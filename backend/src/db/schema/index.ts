@@ -69,7 +69,26 @@ export const portfolioLedgerEntries = pgTable('portfolio_ledger_entries', { id: 
 
 export const idempotencyRecords = pgTable('idempotency_records', { id: uuid('id').primaryKey().defaultRandom(), userId: uuid('user_id').notNull().references(() => users.id), key: text('key').notNull(), requestFingerprint: text('request_fingerprint').notNull(), responseStatus: integer('response_status').notNull(), responseBody: jsonb('response_body').notNull(), expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(), createdAt: auditTime('created_at') }, (t) => [uniqueIndex('idempotency_user_key_unique').on(t.userId, t.key)]);
 
-export const news = pgTable('news', { id: uuid('id').primaryKey().defaultRandom(), publicId: text('public_id').notNull(), eventId: uuid('event_id').references(() => events.id), authorUserId: uuid('author_user_id').notNull().references(() => users.id), type: newsType('type').notNull(), title: text('title').notNull(), body: text('body').notNull(), audience: text('audience').notNull(), publishedAt: auditTime('published_at') }, (t) => [uniqueIndex('news_public_id_unique').on(t.publicId)]);
+export const news = pgTable('news', { id: uuid('id').primaryKey().defaultRandom(), publicId: text('public_id').notNull(), eventId: uuid('event_id').references(() => events.id), authorUserId: uuid('author_user_id').notNull().references(() => users.id), type: text('type').notNull(), title: text('title').notNull(), body: text('body').notNull(), audience: text('audience').notNull(), publishedAt: auditTime('published_at') }, (t) => [uniqueIndex('news_public_id_unique').on(t.publicId)]);
 export const leaderboardSnapshots = pgTable('leaderboard_snapshots', { id: uuid('id').primaryKey().defaultRandom(), eventId: uuid('event_id').notNull().references(() => events.id), version: integer('version').notNull(), simulationDay: integer('simulation_day').notNull(), snapshot: jsonb('snapshot').notNull(), asOf: auditTime('as_of') }, (t) => [uniqueIndex('leaderboard_event_version_unique').on(t.eventId, t.version)]);
 export const auditLogs = pgTable('audit_logs', { id: uuid('id').primaryKey().defaultRandom(), actorUserId: uuid('actor_user_id').references(() => users.id), action: text('action').notNull(), resourceType: text('resource_type').notNull(), resourceId: text('resource_id').notNull(), previousState: jsonb('previous_state'), newState: jsonb('new_state'), requestId: text('request_id').notNull(), ipAddress: text('ip_address'), userAgent: text('user_agent'), metadata: jsonb('metadata').notNull().default({}), createdAt: auditTime('created_at') });
 export const outboxEvents = pgTable('outbox_events', { id: uuid('id').primaryKey().defaultRandom(), eventType: text('event_type').notNull(), aggregateType: text('aggregate_type').notNull(), aggregateId: text('aggregate_id').notNull(), payload: jsonb('payload').notNull(), publishedAt: timestamp('published_at', { withTimezone: true, mode: 'date' }), createdAt: auditTime('created_at') });
+
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type RefreshToken = typeof refreshTokens.$inferSelect;
+export type Dataset = typeof datasets.$inferSelect;
+export type Instrument = typeof instruments.$inferSelect;
+export type DatasetCandle = typeof datasetCandles.$inferSelect;
+export type Event = typeof events.$inferSelect;
+export type SimulationState = typeof simulationStates.$inferSelect;
+export type Portfolio = typeof portfolios.$inferSelect;
+export type Position = typeof positions.$inferSelect;
+export type Order = typeof orders.$inferSelect;
+export type Execution = typeof executions.$inferSelect;
+export type PortfolioLedgerEntry = typeof portfolioLedgerEntries.$inferSelect;
+export type IdempotencyRecord = typeof idempotencyRecords.$inferSelect;
+export type News = typeof news.$inferSelect;
+export type LeaderboardSnapshot = typeof leaderboardSnapshots.$inferSelect;
+export type AuditLog = typeof auditLogs.$inferSelect;
+

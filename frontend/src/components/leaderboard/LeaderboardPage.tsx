@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { mockGetLeaderboard } from '../../mocks/leaderboard';
+import { getLeaderboard } from '../../lib/api/leaderboard';
+import { useAuth } from '../../contexts/AuthContext';
 import type { LeaderboardEntry } from '../../contracts/v1/leaderboard';
 import { SkeletonCard } from '../common/LoadingState';
 import ErrorState from '../common/ErrorState';
@@ -57,6 +58,7 @@ interface LeaderboardPageProps {
 }
 
 export default function LeaderboardPage({ onBack }: LeaderboardPageProps) {
+  const { participant } = useAuth();
   const [data, setData] = useState<{ entries: LeaderboardEntry[]; totalParticipants: number; season: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -65,7 +67,7 @@ export default function LeaderboardPage({ onBack }: LeaderboardPageProps) {
     setLoading(true);
     setError('');
     try {
-      const lb = await mockGetLeaderboard();
+      const lb = await getLeaderboard(participant?.participantId);
       setData(lb);
     } catch {
       setError('Unable to load leaderboard');

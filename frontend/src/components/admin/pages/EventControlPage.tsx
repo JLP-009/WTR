@@ -74,7 +74,7 @@ export default function EventControlPage() {
   if (error) return <div className="p-6"><ErrorState message={error} onRetry={load} /></div>;
 
   const s = event!;
-  const canStart = s.event_status === 'READY';
+  const canStart = s.event_status === 'READY' || s.event_status === 'SETUP';
   const canPause = s.event_status === 'RUNNING';
   const canResume = s.event_status === 'PAUSED';
   const canEnd = s.event_status === 'RUNNING' || s.event_status === 'PAUSED';

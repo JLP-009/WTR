@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowUpRight, Circle } from 'lucide-react';
 import { getPortfolioSummary } from '../../lib/api/portfolio';
 import { getMarketState } from '../../lib/api/market';
-import { mockGetLeaderboard } from '../../mocks/leaderboard';
+import { getLeaderboard } from '../../lib/api/leaderboard';
 import type { PortfolioSummary } from '../../contracts/v1/portfolio';
 import type { MarketState } from '../../contracts/v1/market';
 import { useAuth } from '../../contexts/AuthContext';
@@ -10,8 +10,19 @@ import { SkeletonCard } from '../common/LoadingState';
 import ErrorState from '../common/ErrorState';
 import type { Route } from '../../App';
 
+import { api } from '../../lib/api/client';
+import { wsClient } from '../../lib/websocket';
+
 function fmt(n: number) {
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(n));
+}
+
+interface NewsItem {
+  news_id: string;
+  type: string;
+  title: string;
+  body: string;
+  published_at: string;
 }
 
 interface DashboardPageProps {
@@ -23,6 +34,7 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
   const [market, setMarket] = useState<MarketState | null>(null);
   const [rank, setRank] = useState<{ current: number; total: number } | null>(null);
+  const [latestNews, setLatestNews] = useState<NewsItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -30,14 +42,18 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
     setLoading(true);
     setError('');
     try {
-      const [p, m, lb] = await Promise.all([
+      const [p, m, lb, newsList] = await Promise.all([
         getPortfolioSummary(),
         getMarketState(),
-        mockGetLeaderboard(),
+        getLeaderboard(participant?.participantId),
+        api.get<NewsItem[]>('/news').catch(() => []),
       ]);
       setPortfolio(p);
       setMarket(m);
       setRank({ current: lb.currentUserRank, total: lb.totalParticipants });
+      if (Array.isArray(newsList) && newsList.length > 0) {
+        setLatestNews(newsList[0]);
+      }
     } catch {
       setError('Unable to load portfolio');
     } finally {
@@ -45,7 +61,42 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const unsubNews = wsClient.subscribe('news', (incoming: NewsItem) => {
+      setLatestNews(incoming);
+    });
+    const unsubPort = wsClient.subscribe('portfolio', (payload: any) => {
+      const data = payload?.data || payload;
+      if (data && (data.totalPnl !== undefined || data.total_pnl !== undefined)) {
+        setPortfolio(data);
+      } else {
+        getPortfolioSummary().then(setPortfolio).catch(() => {});
+      }
+    });
+    const unsubMarket = wsClient.subscribe('market', (tick: any) => {
+      if (tick && (tick.symbol === 'NIFTY' || tick.symbol === 'NIFTY 50')) {
+        const ltp = parseFloat(tick.last_price ?? tick.ltp ?? tick.close_price);
+        const change = parseFloat(tick.change ?? '0');
+        const changePct = parseFloat(tick.change_percent ?? tick.changePct ?? '0');
+        if (!isNaN(ltp)) {
+          setMarket({
+            symbol: 'NIFTY',
+            status: 'LIVE',
+            ltp,
+            change,
+            changePct,
+          });
+        }
+      }
+    });
+
+    return () => {
+      unsubNews();
+      unsubPort();
+      unsubMarket();
+    };
+  }, []);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -173,6 +224,31 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
               <ArrowUpRight size={15} className="text-[color:var(--foreground-muted)]" />
             </button>
           </div>
+
+          {/* Live Market Announcements */}
+          {latestNews && (
+            <div className="p-4 rounded-xl border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/5 flex items-start gap-3">
+              <div className="w-7 h-7 rounded-lg bg-[color:var(--accent)]/15 flex items-center justify-center shrink-0 mt-0.5">
+                <Circle size={8} className="text-[color:var(--accent)] fill-current animate-ping" />
+              </div>
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--accent)]">
+                    {latestNews.type.replace('_', ' ')}
+                  </span>
+                  <span className="text-[10px] text-[color:var(--foreground-muted)]">
+                    {new Date(latestNews.published_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <p className="text-xs font-semibold text-[color:var(--foreground)] truncate">
+                  {latestNews.title}
+                </p>
+                <p className="text-xs text-[color:var(--foreground-secondary)] line-clamp-2">
+                  {latestNews.body}
+                </p>
+              </div>
+            </div>
+          )}
         </>
       ) : null}
     </div>

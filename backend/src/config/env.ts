@@ -16,4 +16,14 @@ const environmentSchema = z.object({
 });
 
 export type Environment = z.infer<typeof environmentSchema>;
-export const loadEnvironment = (input: NodeJS.ProcessEnv = process.env): Environment => environmentSchema.parse(input);
+export const loadEnvironment = (input: NodeJS.ProcessEnv = process.env): Environment => {
+  try {
+    if (typeof process.loadEnvFile === 'function') {
+      process.loadEnvFile();
+    }
+  } catch {
+    // Ignore if .env is not found or already loaded
+  }
+  return environmentSchema.parse(input);
+};
+

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts';
 import { getPortfolioSummary } from '../../lib/api/portfolio';
+import { wsClient } from '../../lib/websocket';
 import type { PortfolioSummary } from '../../contracts/v1/portfolio';
 import { SkeletonCard } from '../common/LoadingState';
 import ErrorState from '../common/ErrorState';
@@ -52,7 +53,18 @@ export default function PnlPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const unsub = wsClient.subscribe('portfolio', (payload: any) => {
+      const data = payload?.data || payload;
+      if (data && (data.totalPnl !== undefined || data.total_pnl !== undefined)) {
+        setPortfolio(data);
+      } else {
+        getPortfolioSummary().then(setPortfolio).catch(() => {});
+      }
+    });
+    return () => unsub();
+  }, []);
 
   return (
     <div className="space-y-5">

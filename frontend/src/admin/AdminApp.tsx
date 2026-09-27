@@ -42,6 +42,8 @@ const ROUTE_META: Record<AdminRoute, { label: string; breadcrumbs: { label: stri
   audit:        { label: 'Audit Log',   breadcrumbs: [{ label: 'Admin' }, { label: 'Audit Log', active: true }] },
 };
 
+import ErrorBoundary from '../components/common/ErrorBoundary';
+
 export default function AdminApp() {
   const [route, setRoute] = useState<AdminRoute>('dashboard');
   const meta = ROUTE_META[route];
@@ -52,18 +54,20 @@ export default function AdminApp() {
       onNavigate={setRoute}
       breadcrumbs={meta.breadcrumbs}
     >
-      {route === 'dashboard'   && <AdminDashboard onNavigate={setRoute} />}
-      {route === 'event'       && <EventControlPage />}
-      {route === 'dataset'     && <DatasetPage />}
-      {route === 'simulation'  && <SimulationPage />}
-      {route === 'market'      && <MarketPage />}
-      {route === 'participants' && <ParticipantsPage />}
-      {route === 'orders'      && <OrdersPage />}
-      {route === 'positions'   && <PositionsPage />}
-      {route === 'leaderboard' && <AdminLeaderboardPage />}
-      {route === 'news'        && <NewsPage />}
-      {route === 'monitoring'  && <MonitoringPage />}
-      {route === 'audit'       && <AuditLogPage />}
+      <ErrorBoundary key={route}>
+        {route === 'dashboard'   && <AdminDashboard onNavigate={setRoute} />}
+        {route === 'event'       && <EventControlPage />}
+        {route === 'dataset'     && <DatasetPage />}
+        {route === 'simulation'  && <SimulationPage />}
+        {route === 'market'      && <MarketPage />}
+        {route === 'participants' && <ParticipantsPage />}
+        {route === 'orders'      && <OrdersPage />}
+        {route === 'positions'   && <PositionsPage />}
+        {route === 'leaderboard' && <AdminLeaderboardPage />}
+        {route === 'news'        && <NewsPage />}
+        {route === 'monitoring'  && <MonitoringPage />}
+        {route === 'audit'       && <AuditLogPage />}
+      </ErrorBoundary>
     </AdminLayout>
   );
 }
