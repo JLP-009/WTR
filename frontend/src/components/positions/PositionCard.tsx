@@ -13,13 +13,17 @@ function fmt(n: number) {
 
 export default function PositionCard({ position, onClosed }: PositionCardProps) {
   const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState('');
   const profit = (position.pnl ?? 0) >= 0;
 
   const handleClose = async () => {
     setClosing(true);
+    setCloseError('');
     try {
       const res = await closePosition({ positionId: position.id });
       if (res.success) onClosed(position.id);
+    } catch (err: any) {
+      setCloseError(err?.message || 'Failed to close position. Please try again.');
     } finally {
       setClosing(false);
     }
@@ -74,6 +78,11 @@ export default function PositionCard({ position, onClosed }: PositionCardProps) 
           </p>
         </div>
       </div>
+
+      {/* Error */}
+      {closeError && (
+        <p className="text-xs text-[color:var(--danger)] mb-2 text-center">{closeError}</p>
+      )}
 
       {/* Close */}
       <button

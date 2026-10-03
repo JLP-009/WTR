@@ -162,7 +162,10 @@ export default function ChartPage() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleOrder = (side: 'BUY' | 'SELL') => {
+    if (isSubmitting) return;
     const qty = parseInt(orderQty, 10);
     if (!qty || qty <= 0) { setOrderError('Enter a valid quantity'); return; }
     setOrderError('');
@@ -181,6 +184,8 @@ export default function ChartPage() {
   };
 
   const executeOrder = async (side: 'BUY' | 'SELL', qty: number) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     setOrderError('');
     setOrderSuccess('');
     try {
@@ -194,6 +199,8 @@ export default function ChartPage() {
       }
     } catch {
       setOrderError('Order failed');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -398,18 +405,18 @@ export default function ChartPage() {
         {/* Action Buttons: Solid Green Buy, Solid Red Sell */}
         <div className="flex gap-3 pt-1">
           <button
-            disabled={marketStatus !== 'OPEN'}
+            disabled={marketStatus !== 'OPEN' || isSubmitting}
             onClick={() => handleOrder('BUY')}
             className="flex-1 h-11 rounded-xl text-xs font-black tracking-widest uppercase bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white shadow-md hover:shadow-emerald-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-1.5"
           >
-            <span>Buy</span>
+            <span>{isSubmitting ? '...' : 'Buy'}</span>
           </button>
           <button
-            disabled={marketStatus !== 'OPEN'}
+            disabled={marketStatus !== 'OPEN' || isSubmitting}
             onClick={() => handleOrder('SELL')}
             className="flex-1 h-11 rounded-xl text-xs font-black tracking-widest uppercase bg-rose-600 hover:bg-rose-500 active:scale-[0.98] text-white shadow-md hover:shadow-rose-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-1.5"
           >
-            <span>Sell</span>
+            <span>{isSubmitting ? '...' : 'Sell'}</span>
           </button>
           {currentPos && (
             <button

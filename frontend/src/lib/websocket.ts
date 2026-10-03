@@ -100,6 +100,20 @@ class WebSocketClient {
       this.connect();
     }, 5000);
   }
+
+  public disconnect() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    if (this.socket) {
+      this.socket.onclose = null; // Prevent auto-reconnect
+      this.socket.close();
+      this.socket = null;
+    }
+    this.isConnecting = false;
+    this.handlers.clear();
+  }
 }
 
 export const wsClient = new WebSocketClient();

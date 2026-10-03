@@ -1,6 +1,7 @@
 import { createContext, useContext, useState } from 'react';
 import { login as apiLogin, logout as apiLogout, register as apiRegister, type RegisterRequestPayload } from '../lib/api/auth';
 import { setAuthToken } from '../lib/api/client';
+import { wsClient } from '../lib/websocket';
 import type { Participant } from '../contracts/v1/auth';
 
 interface AuthContextValue {
@@ -61,6 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = () => {
     apiLogout().catch(() => {});
+    wsClient.disconnect();
     setParticipant(null);
     setToken(null);
     setAuthToken(null, null);

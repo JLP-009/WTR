@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and, count } from 'drizzle-orm';
 import { Decimal } from 'decimal.js';
 import * as schema from '../../db/schema/index.js';
 import { livePriceCache } from '../market/price-cache.js';
@@ -79,6 +79,26 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
       positionsByUser.set(pos.userId, existing);
     }
 
+    // Count filled orders per user (single batch query)
+    const tradeCounts = await app.db
+      .select({
+        userId: schema.orders.userId,
+        count: count(),
+      })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.eventId, activeEvent.id),
+          eq(schema.orders.status, 'FILLED')
+        )
+      )
+      .groupBy(schema.orders.userId);
+
+    const tradesMap = new Map<string, number>();
+    for (const tc of tradeCounts) {
+      tradesMap.set(tc.userId, Number(tc.count));
+    }
+
     const entries: LeaderboardEntry[] = users.map((user) => {
       const startCap = new Decimal(user.startingCapital || '1000000');
       const availCash = new Decimal(user.availableCash || '1000000');
@@ -119,7 +139,7 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
         equity: equity.toFixed(2),
         total_pnl: totalPnl.toFixed(2),
         total_pnl_percent: totalPnlPct.toFixed(2),
-        trades_count: 0,
+        trades_count: tradesMap.get(user.userId) || 0,
       };
     });
 

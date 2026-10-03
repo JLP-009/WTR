@@ -416,6 +416,27 @@ export class SimulationWorker {
         positionsByUser.set(pos.userId, existing);
       }
 
+      // 3b. Count filled orders per user
+      const { count: countFn } = await import('drizzle-orm');
+      const tradeCounts = await this.db
+        .select({
+          userId: schema.orders.userId,
+          count: countFn(),
+        })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.eventId, eventId),
+            eq(schema.orders.status, 'FILLED')
+          )
+        )
+        .groupBy(schema.orders.userId);
+
+      const tradesMap = new Map<string, number>();
+      for (const tc of tradeCounts) {
+        tradesMap.set(tc.userId, Number(tc.count));
+      }
+
       // 4. Compute leaderboard entries
       const entries = users.map((user) => {
         const startCap = new Decimal(user.startingCapital || '1000000');
@@ -456,7 +477,7 @@ export class SimulationWorker {
           equity: equity.toFixed(2),
           total_pnl: totalPnl.toFixed(2),
           total_pnl_percent: totalPnlPct.toFixed(2),
-          trades_count: 0,
+          trades_count: tradesMap.get(user.userId) || 0,
         };
       });
 
