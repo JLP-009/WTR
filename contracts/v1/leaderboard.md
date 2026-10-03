@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-Computes dynamic real-time participant equity, rank, total P&L, return percentages, and win rates across all registered active traders.
+Returns participant equity, rank, total P&L, return percentages, and win rates across all registered active traders. To prevent database locking and ensure high performance with 300+ users, the leaderboard relies on End-Of-Day (EOD) snapshots rather than computing real-time live equity.
 
 ---
 

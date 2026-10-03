@@ -159,6 +159,7 @@ Submitted market orders.
 - `idempotency_key` (TEXT, NOT NULL)
 - `created_at`, `updated_at` (TIMESTAMPTZ)
 - **Constraints:** UNIQUE on `(event_id, user_id, client_order_id)` and UNIQUE on `(user_id, idempotency_key)`
+- **Indexes:** B-tree on `(user_id, event_id)` and B-tree on `(status)` for fast retrieval.
 
 #### `executions`
 Executed trade fills.
@@ -168,6 +169,7 @@ Executed trade fills.
 - `quantity` (INTEGER, NOT NULL, check: `> 0`)
 - `price` (`numeric(24, 8)`, NOT NULL, check: `> 0`)
 - `executed_at` (TIMESTAMPTZ, NOT NULL, default: `NOW()`)
+- **Indexes:** B-tree on `(order_id)` to speed up order execution lookups.
 
 #### `portfolio_ledger_entries`
 Append-only immutable financial audit trail.
@@ -179,6 +181,7 @@ Append-only immutable financial audit trail.
 - `balance_after` (`numeric(24, 8)`, NOT NULL)
 - `metadata` (JSONB, NOT NULL, default: `{}`)
 - `created_at` (TIMESTAMPTZ, NOT NULL, default: `NOW()`)
+- **Indexes:** B-tree on `(portfolio_id)` to prevent N+1 query slowdowns.
 
 ---
 

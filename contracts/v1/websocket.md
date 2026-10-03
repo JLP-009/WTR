@@ -119,5 +119,6 @@ Client sends subscription request:
 ---
 
 ## 3. Heartbeat (Ping/Pong)
-- Client sends: `{ "action": "ping" }`
-- Server responds: `{ "type": "pong", "data": { "timestamp": "2026-09-30T09:25:30.000Z" } }`
+- **Protocol-Level Heartbeat:** Server sends raw WebSocket `ping` frames every 30 seconds.
+- **Client Response:** The browser's native WebSocket API automatically replies with a raw `pong` frame.
+- **Zombie Cleanup:** If a client fails to return a `pong` within the 30-second window, the server forcefully terminates the connection to prevent memory leaks.

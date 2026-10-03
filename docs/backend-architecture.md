@@ -102,8 +102,9 @@ Warangal Trading Ring (WTR) backend is a high-throughput, low-latency trading si
 
 ### 2.5. Real-Time WebSocket Gateway (`backend/src/modules/websocket/`)
 - **Handshake & Auth:** Immediate `connection.established` handshake; clients authenticate via `{ "action": "auth", "token": "<JWT>" }`.
+- **Heartbeat:** Server issues ping/pong checks every 30s to terminate dead/zombie connections, releasing memory instantly.
 - **Channels:** `market`, `news`, `portfolio`, `positions`, `leaderboard`, `orders`.
-- **Broadcast Isolation:** Public events (quotes, market status, news, leaderboard) are broadcast globally; private events (order fills, portfolio updates, private position alerts) are delivered exclusively to the authenticated user's socket connection.
+- **Broadcast Isolation:** Public events (quotes, market status, news) are broadcast globally; private events (order fills, portfolio updates) are delivered exclusively to the authenticated user's socket connection instantly upon execution to prevent UI blind spots.
 
 ---
 
@@ -111,8 +112,8 @@ Warangal Trading Ring (WTR) backend is a high-throughput, low-latency trading si
 
 | Dimension | Target | Architecture Provision |
 |---|---|---|
-| Concurrent Users | 300+ Active Traders | Asynchronous Fastify event loop, connection pooling (`max: 50`), in-memory price caching |
-| Order Throughput | 50+ orders/sec | Immediate single-trade execution without order book depth search |
+| Concurrent Users | 300+ Active Traders | Asynchronous Fastify event loop, connection pooling (`max: 150`), WebSocket heartbeat |
+| Order Throughput | 500+ orders/sec | Immediate execution; DB indexed on high-traffic queries; Portfolio/Positions use RAM (`livePriceCache`) bypassing DB N+1 loops |
 | Data Integrity | Zero Lost Updates | PostgreSQL ACID transactions with `FOR UPDATE` row locks |
-| Crash Recovery | Zero State Loss | State strictly persisted in PostgreSQL; simulation worker re-syncs cursor on startup |
+| Crash Recovery | Zero State Loss | State strictly persisted in PostgreSQL; graceful shutdown hooks close WS & DB connections safely |
 | Financial Precision | 100% Exact | `numeric(24,8)` database columns + `decimal.js` calculations |
