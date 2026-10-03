@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { Users, ShoppingCart, Briefcase, Clock, Zap, Activity } from 'lucide-react';
 import StatCard from '../common/StatCard';
 import StatusBadge from '../common/StatusBadge';
+import DaySessionTimer from '../common/DaySessionTimer';
 import ErrorState from '../../common/ErrorState';
 import { SkeletonCard } from '../../common/LoadingState';
-import { getAdminEvent, getAdminMonitoring, getAdminOrdersMonitor } from '../../../lib/api/admin';
+import { getAdminEvent, getAdminMonitoring, getAdminOrdersMonitor, advanceAdminSimulationDay, generateIdempotencyKey } from '../../../lib/api/admin';
 import type { AdminEventState, AdminMonitoringState, AdminOrder } from '../../../types/admin';
 import type { AdminRoute } from '../../../admin/AdminApp';
 
@@ -31,6 +32,7 @@ export default function AdminDashboard({ onNavigate }: DashboardProps) {
   const [recentOrders, setRecentOrders] = useState<AdminOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
 
   const load = async () => {
     setLoading(true); setError('');
@@ -45,6 +47,18 @@ export default function AdminDashboard({ onNavigate }: DashboardProps) {
       setRecentOrders(o.data.slice(0, 6));
     } catch { setError('Unable to load dashboard data'); }
     finally { setLoading(false); }
+  };
+
+  const handleStartNextDay = async () => {
+    setActionLoading(true);
+    try {
+      await advanceAdminSimulationDay(generateIdempotencyKey());
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to advance to next day');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -69,6 +83,21 @@ export default function AdminDashboard({ onNavigate }: DashboardProps) {
           Warangal Trading Ring — Admin Control Center
         </p>
       </div>
+
+      {/* Live Trading Day Session Timer & Control */}
+      {event && (
+        <DaySessionTimer
+          simulationDay={event.simulation_day}
+          totalSimulationDays={event.configured_total_simulation_days}
+          intervalIndex={event.cursor?.interval_index ?? 0}
+          marketStatus={event.market_status}
+          dayStatus={event.day_status}
+          simulationTime={event.simulation_time}
+          onStartNextDay={handleStartNextDay}
+          onOpenNews={() => onNavigate('news')}
+          actionLoading={actionLoading}
+        />
+      )}
 
       {/* Event status hero */}
       {event && (

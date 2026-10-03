@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Briefcase } from 'lucide-react';
 import { getPositions } from '../../lib/api/positions';
+import { wsClient } from '../../lib/websocket';
 import type { Position } from '../../contracts/v1/positions';
 import PositionCard from './PositionCard';
 import { SkeletonCard } from '../common/LoadingState';
@@ -25,7 +26,51 @@ export default function PositionsPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const unsubOrder = wsClient.subscribe('orders', () => {
+      getPositions().then(setPositions).catch(() => {});
+    });
+    const unsubPos = wsClient.subscribe('positions', () => {
+      getPositions().then(setPositions).catch(() => {});
+    });
+    const unsubMarket = wsClient.subscribe('market', (tick: any) => {
+      const data = tick?.data || tick;
+      if (!data?.symbol || !data?.last_price) return;
+      const latestPrice = parseFloat(data.last_price);
+      if (isNaN(latestPrice)) return;
+
+      setPositions((prev) =>
+        prev.map((pos) => {
+          if (pos.symbol.toUpperCase() === data.symbol.toUpperCase()) {
+            const entry = pos.avgPrice ?? 0;
+            const qty = pos.quantity ?? 0;
+            let unrealized = 0;
+            if (pos.side === 'LONG') {
+              unrealized = (latestPrice - entry) * qty;
+            } else if (pos.side === 'SHORT') {
+              unrealized = (entry - latestPrice) * qty;
+            }
+            const invested = entry * qty;
+            const pnlPct = invested > 0 ? (unrealized / invested) * 100 : 0;
+            return {
+              ...pos,
+              ltp: latestPrice,
+              pnl: parseFloat(unrealized.toFixed(2)),
+              pnlPct: parseFloat(pnlPct.toFixed(2)),
+            };
+          }
+          return pos;
+        })
+      );
+    });
+
+    return () => {
+      unsubOrder();
+      unsubPos();
+      unsubMarket();
+    };
+  }, []);
 
   const handleClosed = (id: string) => {
     setPositions((prev) => prev.filter((p) => p.id !== id));

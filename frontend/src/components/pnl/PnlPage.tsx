@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts';
-import { getPortfolioSummary } from '../../lib/api/portfolio';
+import { getPortfolioSummary, normalizePortfolioSummary } from '../../lib/api/portfolio';
+import { wsClient } from '../../lib/websocket';
 import type { PortfolioSummary } from '../../contracts/v1/portfolio';
 import { SkeletonCard } from '../common/LoadingState';
 import ErrorState from '../common/ErrorState';
 import { useTheme } from '../../contexts/ThemeContext';
 
 function fmt(n: number) {
-  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(n));
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(n || 0));
 }
 
 const PERF_DATA = Array.from({ length: 20 }, (_, i) => ({
@@ -52,7 +53,18 @@ export default function PnlPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const unsub = wsClient.subscribe('portfolio', (payload: any) => {
+      const data = payload?.data || payload;
+      if (data) {
+        setPortfolio(normalizePortfolioSummary(data));
+      } else {
+        getPortfolioSummary().then(setPortfolio).catch(() => {});
+      }
+    });
+    return () => unsub();
+  }, []);
 
   return (
     <div className="space-y-5">
@@ -72,17 +84,17 @@ export default function PnlPage() {
             <div className="flex items-end gap-3">
               <span
                 className={`text-4xl font-bold tabular-nums leading-none ${
-                  portfolio.totalPnl >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
+                  (portfolio.totalPnl ?? 0) >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
                 }`}
               >
-                {portfolio.totalPnl >= 0 ? '+' : '−'}₹{fmt(portfolio.totalPnl)}
+                {(portfolio.totalPnl ?? 0) >= 0 ? '+' : '−'}₹{fmt(portfolio.totalPnl ?? 0)}
               </span>
               <span
                 className={`text-sm font-medium tabular-nums mb-0.5 ${
-                  portfolio.totalPnl >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
+                  (portfolio.totalPnl ?? 0) >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
                 }`}
               >
-                {portfolio.totalPnl >= 0 ? '+' : '−'}{Math.abs(portfolio.totalPnlPct).toFixed(2)}%
+                {(portfolio.totalPnl ?? 0) >= 0 ? '+' : '−'}{Math.abs(portfolio.totalPnlPct ?? 0).toFixed(2)}%
               </span>
             </div>
 
@@ -123,21 +135,19 @@ export default function PnlPage() {
           <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-2xl px-4">
             <StatRow
               label="Realized P&L"
-              value={`${portfolio.realizedPnl >= 0 ? '+' : '−'}₹${fmt(portfolio.realizedPnl)}`}
-              color={portfolio.realizedPnl >= 0 ? 'success' : 'danger'}
+              value={`${(portfolio.realizedPnl ?? 0) >= 0 ? '+' : '−'}₹${fmt(portfolio.realizedPnl ?? 0)}`}
+              color={(portfolio.realizedPnl ?? 0) >= 0 ? 'success' : 'danger'}
             />
             <StatRow
               label="Unrealized P&L"
-              value={`${portfolio.unrealizedPnl >= 0 ? '+' : '−'}₹${fmt(portfolio.unrealizedPnl)}`}
-              color={portfolio.unrealizedPnl >= 0 ? 'success' : 'danger'}
+              value={`${(portfolio.unrealizedPnl ?? 0) >= 0 ? '+' : '−'}₹${fmt(portfolio.unrealizedPnl ?? 0)}`}
+              color={(portfolio.unrealizedPnl ?? 0) >= 0 ? 'success' : 'danger'}
             />
             <StatRow
               label="Today's P&L"
-              value={`${portfolio.todayPnl >= 0 ? '+' : '−'}₹${fmt(portfolio.todayPnl)}`}
-              color={portfolio.todayPnl >= 0 ? 'success' : 'danger'}
+              value={`${(portfolio.todayPnl ?? 0) >= 0 ? '+' : '−'}₹${fmt(portfolio.todayPnl ?? 0)}`}
+              color={(portfolio.todayPnl ?? 0) >= 0 ? 'success' : 'danger'}
             />
-            <StatRow label="Win Rate" value={`${portfolio.winRate}%`} />
-            <StatRow label="Total Trades" value={`${portfolio.totalTrades}`} />
           </div>
         </>
       ) : null}

@@ -1,31 +1,52 @@
 /**
  * Auth schemas for Warangal Trading Ring API
- * STATUS: DRAFT — v1
+ * STATUS: APPROVED — v1
  */
 
-import type { UserId, ISOTimestamp } from './common';
+import type { UserId, ISOTimestamp } from './common.js';
 
-// ---------------------------------------------------------------------------
-// POST /api/v1/auth/login
-// ---------------------------------------------------------------------------
-export interface LoginRequest {
-  participant_id: string;  // Max 64 chars, [A-Z0-9_-]
-  password: string;        // Non-empty
+export type UserRole = 'PARTICIPANT' | 'ADMIN';
+export type AccountStatus = 'ACTIVE' | 'DISABLED';
+
+export interface AuthenticatedUser {
+  user_id: UserId;
+  participant_id: string;
+  display_name: string;
+  role?: UserRole;
+  account_status?: AccountStatus;
 }
 
-export interface LoginResponse {
+// ---------------------------------------------------------------------------
+// POST /api/v1/auth/register
+// ---------------------------------------------------------------------------
+export interface RegisterRequest {
+  participant_id: string;
+  display_name: string;
+  password: string;
+}
+
+export interface RegisterResponse {
   access_token: string;
   token_type: 'Bearer';
-  expires_in: number;      // Seconds until access_token expires
+  expires_in: number;
   refresh_token: string;
   user: AuthenticatedUser;
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/v1/auth/logout
+// POST /api/v1/auth/login
 // ---------------------------------------------------------------------------
-export interface LogoutResponse {
-  logged_out: true;
+export interface LoginRequest {
+  participant_id: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: 'Bearer';
+  expires_in: number;
+  refresh_token: string;
+  user: AuthenticatedUser;
 }
 
 // ---------------------------------------------------------------------------
@@ -39,7 +60,14 @@ export interface RefreshResponse {
   access_token: string;
   token_type: 'Bearer';
   expires_in: number;
-  refresh_token: string;   // Rotated token (new value)
+  refresh_token: string;
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/auth/logout
+// ---------------------------------------------------------------------------
+export interface LogoutResponse {
+  success: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,16 +77,20 @@ export interface MeResponse {
   user_id: UserId;
   participant_id: string;
   display_name: string;
+  role: UserRole;
   account_status: AccountStatus;
+  created_at: ISOTimestamp;
 }
 
 // ---------------------------------------------------------------------------
-// Shared sub-types
+// POST /api/v1/auth/forgot-password & /reset-password
 // ---------------------------------------------------------------------------
-export interface AuthenticatedUser {
-  user_id: UserId;
+export interface ResetPasswordRequest {
   participant_id: string;
-  display_name: string;
+  new_password: string;
 }
 
-export type AccountStatus = 'ACTIVE' | 'DISABLED';
+export interface ResetPasswordResponse {
+  success: boolean;
+  message: string;
+}

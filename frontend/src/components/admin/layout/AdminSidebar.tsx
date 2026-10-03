@@ -61,15 +61,18 @@ export default function AdminSidebar({ current, onNavigate, onClose }: AdminSide
     <div className="flex flex-col h-full">
       {/* Brand */}
       <div className="flex items-center gap-2.5 px-4 h-14 border-b border-[color:var(--border)] flex-shrink-0">
-        <div className="w-7 h-7 rounded-lg bg-[color:var(--danger)]/15 flex items-center justify-center">
-          <Shield size={14} className="text-[color:var(--danger)]" />
-        </div>
+        <img src="/logo.png" alt="WTR 2.0" className="w-8 h-8 object-contain shrink-0" />
         <div>
-          <p className="text-[11px] font-semibold tracking-[0.12em] text-[color:var(--foreground)] uppercase leading-tight">
-            Warangal
-          </p>
-          <p className="text-[9px] font-medium tracking-widest text-[color:var(--danger)] uppercase leading-tight">
-            Admin
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-black tracking-wider text-[color:var(--foreground)] uppercase">
+              WTR
+            </span>
+            <span className="px-1 py-0.2 rounded text-[9px] font-black bg-[color:var(--accent)] text-white">
+              2.0
+            </span>
+          </div>
+          <p className="text-[9px] font-bold tracking-widest text-[color:var(--danger)] uppercase leading-tight mt-0.5">
+            Admin Portal
           </p>
         </div>
       </div>

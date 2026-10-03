@@ -47,9 +47,10 @@ export default function DatasetPage() {
         </button>
       </div>
 
-      {/* Draft notice */}
-      <div className="px-4 py-3 rounded-xl bg-[color:var(--warning)]/8 border border-[color:var(--warning)]/20 text-xs text-[color:var(--warning)]">
-        <strong>Backend integration pending:</strong> Dataset upload, delete, and activation endpoints are not yet defined in the API contract (v1 DRAFT). The table below is read-only mock data. Upload UI will be enabled once the contract is finalized.
+      {/* Active dataset info notice */}
+      <div className="px-4 py-3 rounded-xl bg-[color:var(--accent)]/10 border border-[color:var(--accent)]/20 text-xs text-[color:var(--accent)] flex items-center justify-between">
+        <span><strong>Active Dataset:</strong> 12 symbols across 20 trading days (17,280 candles) loaded into PostgreSQL.</span>
+        <span className="font-semibold text-[10px] px-2 py-0.5 rounded bg-[color:var(--accent)]/20">LIVE IN-DB</span>
       </div>
 
       {datasets.length === 0 ? (
@@ -59,7 +60,7 @@ export default function DatasetPage() {
           {datasets.map((ds) => (
             <div
               key={ds.dataset_id}
-              className={`bg-[color:var(--surface)] border rounded-2xl p-5 space-y-4 ${ds.active ? 'border-[color:var(--accent)]/40' : 'border-[color:var(--border)]'}`}
+              className={`bg-[color:var(--surface)] border rounded-2xl p-5 space-y-4 ${ds.active ? 'border-[color:var(--accent)]/40 shadow-sm' : 'border-[color:var(--border)]'}`}
             >
               {/* Header */}
               <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -109,39 +110,20 @@ export default function DatasetPage() {
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-[color:var(--foreground-muted)] mb-1">Checksum</p>
                 <p className="text-[11px] font-mono text-[color:var(--foreground-muted)] break-all">{ds.checksum}</p>
               </div>
-
-              {/* Actions placeholder */}
-              {!ds.active && (
-                <div className="pt-3 border-t border-[color:var(--border)] flex gap-2">
-                  <button
-                    disabled
-                    title="Pending: POST /api/v1/admin/dataset/{id}/activate — not yet in contract"
-                    className="px-4 py-2 text-xs font-medium rounded-lg border border-[color:var(--border)] text-[color:var(--foreground-muted)] opacity-50 cursor-not-allowed"
-                  >
-                    Activate (pending API)
-                  </button>
-                </div>
-              )}
             </div>
           ))}
         </div>
       )}
 
-      {/* Upload placeholder */}
-      <div className="border-2 border-dashed border-[color:var(--border)] rounded-2xl p-8 text-center space-y-3">
-        <Database size={28} className="mx-auto text-[color:var(--foreground-muted)]" />
-        <div>
-          <p className="text-sm font-medium text-[color:var(--foreground-secondary)]">Upload Dataset</p>
-          <p className="text-xs text-[color:var(--foreground-muted)] mt-1">
-            Upload endpoint not yet defined in API contract (DRAFT).
-          </p>
+      {/* Dataset import guide */}
+      <div className="border border-[color:var(--border)] bg-[color:var(--surface)] rounded-2xl p-6 space-y-2">
+        <div className="flex items-center gap-2">
+          <Database size={18} className="text-[color:var(--accent)]" />
+          <p className="text-sm font-semibold text-[color:var(--foreground)]">Adding / Importing Datasets</p>
         </div>
-        <button
-          disabled
-          className="px-5 py-2.5 text-xs font-medium rounded-lg bg-[color:var(--accent)] text-white opacity-40 cursor-not-allowed"
-        >
-          Upload Dataset (pending)
-        </button>
+        <p className="text-xs text-[color:var(--foreground-muted)] leading-relaxed">
+          Datasets are automatically processed and loaded into PostgreSQL via the CSV batch engine. To ingest new CSV files or replacement datasets, place the extracted symbol folders in <code className="font-mono text-[color:var(--accent)] bg-[color:var(--surface-muted)] px-1.5 py-0.5 rounded">backend/data/datasets/</code> and run <code className="font-mono text-[color:var(--accent)] bg-[color:var(--surface-muted)] px-1.5 py-0.5 rounded">npm run import:csv &lt;folder-path&gt;</code>.
+        </p>
       </div>
     </div>
   );

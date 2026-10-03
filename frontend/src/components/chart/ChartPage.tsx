@@ -1,21 +1,24 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { ChevronDown } from 'lucide-react';
+import { api } from '../../lib/api/client';
 import { getMarketState, getMarketData } from '../../lib/api/market';
 import { getPositions } from '../../lib/api/positions';
 import { submitOrder } from '../../lib/api/orders';
-import type { MarketState, Timeframe } from '../../contracts/v1/market';
+import type { MarketState } from '../../contracts/v1/market';
 import type { Candle } from '../../contracts/v1/market';
 import type { Position } from '../../contracts/v1/positions';
 import { TRADABLE_SYMBOLS } from '../../mocks/market';
+import { wsClient } from '../../lib/websocket';
 import ErrorState from '../common/ErrorState';
 import { useTheme } from '../../contexts/ThemeContext';
 import LWChart from './LWChart';
 import FlipWarning from './FlipWarning';
 
-const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '1H', '1D'];
-
 function fmt(n: number) {
-  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(n));
+  return new Intl.NumberFormat('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.abs(n));
 }
 
 export default function ChartPage() {
@@ -23,8 +26,8 @@ export default function ChartPage() {
   const isDark = resolvedTheme === 'dark';
 
   const [symbol, setSymbol] = useState(TRADABLE_SYMBOLS[0]);
-  const [timeframe, setTimeframe] = useState<Timeframe>('5m');
   const [market, setMarket] = useState<MarketState | null>(null);
+  const [marketStatus, setMarketStatus] = useState<string>('OPEN');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -45,11 +48,28 @@ export default function ChartPage() {
 
   const currentPos = positions.find((p) => p.symbol === symbol) ?? null;
 
-  const loadChart = useCallback(async (sym: string, tf: Timeframe) => {
+  useEffect(() => {
+    // Initial market status check
+    api.get<{ status: string }>('/market/status')
+      .then((res) => {
+        if (res && res.status) setMarketStatus(res.status);
+      })
+      .catch(() => {});
+
+    const unsubStatus = wsClient.subscribe('market_status', (data: any) => {
+      if (data && data.status) {
+        setMarketStatus(data.status);
+      }
+    });
+
+    return () => unsubStatus();
+  }, []);
+
+  const loadChart = useCallback(async (sym: string) => {
     setLoading(true);
     setError('');
     try {
-      const [m, data] = await Promise.all([getMarketState(sym), getMarketData(sym, tf)]);
+      const [m, data] = await Promise.all([getMarketState(sym), getMarketData(sym)]);
       setMarket(m);
       setCandles(data.candles);
     } catch {
@@ -66,9 +86,70 @@ export default function ChartPage() {
   }, []);
 
   useEffect(() => {
-    loadChart(symbol, timeframe);
+    loadChart(symbol);
     loadPositions();
-  }, [symbol, timeframe, loadChart, loadPositions]);
+  }, [symbol, loadChart, loadPositions]);
+
+  // Real-time market tick & portfolio subscriptions
+  useEffect(() => {
+    const unsubMarket = wsClient.subscribe('market', (tick: any) => {
+      if (tick && tick.symbol === symbol) {
+        const ltp = parseFloat(tick.last_price ?? tick.ltp ?? tick.close_price);
+        const change = parseFloat(tick.change ?? '0');
+        const changePct = parseFloat(tick.change_percent ?? tick.changePct ?? '0');
+        if (!isNaN(ltp)) {
+          setMarket({
+            symbol,
+            status: 'LIVE',
+            ltp,
+            change,
+            changePct,
+          });
+
+          if (tick.timestamp && tick.open_price) {
+            const timeSec = Math.floor(new Date(tick.timestamp).getTime() / 1000);
+            const candleObj = {
+              time: timeSec,
+              open: parseFloat(tick.open_price),
+              high: parseFloat(tick.high_price || tick.open_price),
+              low: parseFloat(tick.low_price || tick.open_price),
+              close: parseFloat(tick.close_price || tick.last_price),
+              volume: tick.volume ? parseInt(tick.volume, 10) : 0,
+            };
+            setCandles((prev) => {
+              if (!prev || prev.length === 0) {
+                return [candleObj];
+              }
+              const lastCandle = prev[prev.length - 1];
+              if (lastCandle.time === timeSec) {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  ...lastCandle,
+                  high: Math.max(lastCandle.high, candleObj.high),
+                  low: Math.min(lastCandle.low, candleObj.low),
+                  close: candleObj.close,
+                  volume: candleObj.volume,
+                };
+                return updated;
+              } else if (timeSec > lastCandle.time) {
+                return [...prev, candleObj];
+              }
+              return prev;
+            });
+          }
+        }
+      }
+    });
+
+    const unsubOrders = wsClient.subscribe('orders', () => {
+      loadPositions();
+    });
+
+    return () => {
+      unsubMarket();
+      unsubOrders();
+    };
+  }, [symbol, loadPositions]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -81,13 +162,16 @@ export default function ChartPage() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleOrder = (side: 'BUY' | 'SELL') => {
+    if (isSubmitting) return;
     const qty = parseInt(orderQty, 10);
     if (!qty || qty <= 0) { setOrderError('Enter a valid quantity'); return; }
     setOrderError('');
 
     // Flip check
-    if (currentPos) {
+    if (currentPos && currentPos.quantity > 0) {
       const isFlip =
         (side === 'SELL' && currentPos.side === 'LONG' && qty > currentPos.quantity) ||
         (side === 'BUY' && currentPos.side === 'SHORT' && qty > currentPos.quantity);
@@ -100,6 +184,8 @@ export default function ChartPage() {
   };
 
   const executeOrder = async (side: 'BUY' | 'SELL', qty: number) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     setOrderError('');
     setOrderSuccess('');
     try {
@@ -107,17 +193,19 @@ export default function ChartPage() {
       if (res.status === 'ACCEPTED') {
         setOrderSuccess(res.message);
         setTimeout(() => setOrderSuccess(''), 3000);
-        loadPositions();
+        await loadPositions();
       } else {
         setOrderError(res.message);
       }
     } catch {
       setOrderError('Order failed');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleClose = async () => {
-    if (!currentPos) return;
+    if (!currentPos || currentPos.quantity <= 0) return;
     const side = currentPos.side === 'LONG' ? 'SELL' : 'BUY';
     await executeOrder(side, currentPos.quantity);
   };
@@ -127,6 +215,13 @@ export default function ChartPage() {
     setPendingOrder(null);
     executeOrder(pendingOrder.side, pendingOrder.qty);
   };
+
+  const currentEntryPrice = currentPos ? (currentPos.avgPrice || (currentPos as any).average_entry_price || (currentPos as any).entry_price || 0) : 0;
+  const positionForChart = currentPos && currentPos.quantity > 0 && Number(currentEntryPrice) > 0 ? {
+    side: currentPos.side,
+    entryPrice: Number(currentEntryPrice),
+    quantity: currentPos.quantity,
+  } : null;
 
   return (
     <div className="flex flex-col gap-3 -mt-1">
@@ -143,10 +238,10 @@ export default function ChartPage() {
           </div>
           <div className="text-right">
             <p className={`text-sm font-semibold tabular-nums ${market.changePct >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}>
-              {market.changePct >= 0 ? '+' : ''}{market.changePct.toFixed(2)}%
+              {market.changePct >= 0 ? '+' : '−'}{Math.abs(market.changePct).toFixed(2)}%
             </p>
-            <p className={`text-xs tabular-nums ${market.changePct >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}>
-              {market.change >= 0 ? '+' : ''}₹{fmt(market.change)}
+            <p className={`text-xs font-medium tabular-nums ${market.change >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}>
+              {market.change >= 0 ? '+' : '−'}₹{fmt(market.change)}
             </p>
           </div>
         </div>
@@ -194,96 +289,157 @@ export default function ChartPage() {
         )}
       </div>
 
-      {/* Timeframes */}
-      <div className="flex gap-1" role="tablist" aria-label="Timeframe">
-        {TIMEFRAMES.map((tf) => (
-          <button
-            key={tf}
-            role="tab"
-            aria-selected={timeframe === tf}
-            onClick={() => setTimeframe(tf)}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-              timeframe === tf
-                ? 'bg-[color:var(--accent)] text-[color:var(--background)]'
-                : 'text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground-secondary)]'
-            }`}
-          >
-            {tf}
-          </button>
-        ))}
-      </div>
-
       {/* Chart */}
       {error ? (
-        <ErrorState message={error} onRetry={() => loadChart(symbol, timeframe)} />
+        <ErrorState message={error} onRetry={() => loadChart(symbol)} />
       ) : loading ? (
         <div className="h-64 rounded-xl bg-[color:var(--surface-muted)] animate-pulse" />
       ) : (
         <div className="h-[260px] rounded-xl overflow-hidden border border-[color:var(--border)]">
-          <LWChart candles={candles} isDark={isDark} />
+          <LWChart
+            candles={candles}
+            isDark={isDark}
+            position={positionForChart}
+          />
         </div>
       )}
 
       {/* Current position context */}
-      {currentPos && (
-        <div className="flex items-center justify-between px-3 py-2.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold tracking-widest uppercase px-1.5 py-0.5 rounded-full border border-[color:var(--border-strong)] text-[color:var(--foreground-secondary)]">
-              {currentPos.side}
-            </span>
-            <span className="text-xs text-[color:var(--foreground-secondary)]">
-              {currentPos.quantity} qty
+      {currentPos && currentPos.quantity > 0 && (() => {
+        const entryPrice = currentEntryPrice;
+        const qty = currentPos.quantity;
+        const livePnl = market && !isNaN(market.ltp) && entryPrice > 0
+          ? (currentPos.side === 'LONG' ? (market.ltp - entryPrice) * qty : (entryPrice - market.ltp) * qty)
+          : (currentPos.pnl || 0);
+
+        return (
+          <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)]">
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] font-extrabold tracking-widest uppercase px-2 py-0.5 rounded-md ${
+                currentPos.side === 'LONG' ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-500 border border-rose-500/30'
+              }`}>
+                {currentPos.side}
+              </span>
+              <span className="text-xs font-semibold text-[color:var(--foreground-secondary)]">
+                {qty} qty
+              </span>
+              {entryPrice > 0 && (
+                <span className="text-[11px] text-[color:var(--foreground-muted)] hidden sm:inline">
+                  @ ₹{fmt(entryPrice)}
+                </span>
+              )}
+            </div>
+            <span className={`text-xs font-bold tabular-nums ${livePnl >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}>
+              {livePnl >= 0 ? '+' : '−'}₹{fmt(livePnl)}
             </span>
           </div>
-          <span className={`text-xs font-semibold tabular-nums ${currentPos.pnl >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}>
-            {currentPos.pnl >= 0 ? '+' : '−'}₹{fmt(currentPos.pnl)}
-          </span>
+        );
+      })()}
+
+      {/* Market Status Lock Warning */}
+      {marketStatus !== 'OPEN' && (
+        <div className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 ${
+          marketStatus === 'HALTED' ? 'bg-[color:var(--danger)]/15 border-[color:var(--danger)] text-[color:var(--danger)] animate-pulse' :
+          marketStatus === 'PAUSED' ? 'bg-[color:var(--warning)]/15 border-[color:var(--warning)] text-[color:var(--warning)]' :
+          'bg-[color:var(--surface-muted)] border-[color:var(--border)] text-[color:var(--foreground-muted)]'
+        }`}>
+          <span>⚠️ MARKET {marketStatus} — ORDERS LOCKED</span>
         </div>
       )}
 
       {/* Order panel */}
-      <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-xl p-3 space-y-2.5">
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min="1"
-            value={orderQty}
-            onChange={(e) => setOrderQty(e.target.value)}
-            aria-label="Order quantity"
-            placeholder="Qty"
-            className="w-20 h-9 px-3 rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] text-sm font-mono tabular-nums text-[color:var(--foreground)] focus:outline-none focus:border-[color:var(--accent)] transition-colors"
-          />
-          {market && (
-            <span className="text-xs text-[color:var(--foreground-muted)]">
-              ≈ ₹{fmt(parseFloat(orderQty || '0') * market.ltp)}
+      <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-2xl p-4 space-y-4 shadow-sm">
+        {/* Quantity Section: Label -> Input Box -> Estimated Value */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label htmlFor="order-quantity-input" className="text-xs font-bold uppercase tracking-wider text-[color:var(--foreground-secondary)]">
+              Quantity
+            </label>
+            <span className="text-[11px] font-medium text-[color:var(--foreground-muted)]">
+              Units
             </span>
-          )}
+          </div>
+
+          {/* Quantity Stepper & Input Box */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={marketStatus !== 'OPEN' || parseInt(orderQty || '1', 10) <= 1}
+              onClick={() => setOrderQty((prev) => Math.max(1, (parseInt(prev || '1', 10) - 1)).toString())}
+              className="w-10 h-11 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] text-[color:var(--foreground)] font-bold text-lg hover:bg-[color:var(--surface-elevated)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shrink-0"
+            >
+              −
+            </button>
+            <input
+              id="order-quantity-input"
+              type="number"
+              min="1"
+              disabled={marketStatus !== 'OPEN'}
+              value={orderQty}
+              onChange={(e) => setOrderQty(e.target.value)}
+              aria-label="Order quantity"
+              placeholder="Quantity"
+              className="flex-1 h-11 px-4 text-center rounded-xl border-2 border-[color:var(--border)] bg-[color:var(--background)] text-base font-mono font-bold tabular-nums text-[color:var(--foreground)] focus:outline-none focus:border-[color:var(--accent)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            <button
+              type="button"
+              disabled={marketStatus !== 'OPEN'}
+              onClick={() => setOrderQty((prev) => (parseInt(prev || '0', 10) + 1).toString())}
+              className="w-10 h-11 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] text-[color:var(--foreground)] font-bold text-lg hover:bg-[color:var(--surface-elevated)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shrink-0"
+            >
+              +
+            </button>
+          </div>
+
+          {/* Estimated Value Display */}
+          <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[color:var(--surface-muted)]/60 border border-[color:var(--border)]">
+            <span className="text-xs text-[color:var(--foreground-muted)] font-medium">
+              Estimated Value
+            </span>
+            <span className="text-xs font-mono font-bold tabular-nums text-[color:var(--foreground)]">
+              {market ? `₹${fmt(parseFloat(orderQty || '0') * market.ltp)}` : '—'}
+            </span>
+          </div>
         </div>
-        <div className="flex gap-2">
+
+        {/* Action Buttons: Solid Green Buy, Solid Red Sell */}
+        <div className="flex gap-3 pt-1">
           <button
+            disabled={marketStatus !== 'OPEN' || isSubmitting}
             onClick={() => handleOrder('BUY')}
-            className="flex-1 h-9 rounded-lg text-xs font-semibold tracking-wider uppercase border border-[color:var(--border-strong)] text-[color:var(--foreground-secondary)] hover:border-[color:var(--success)] hover:text-[color:var(--success)] transition-colors"
+            className="flex-1 h-11 rounded-xl text-xs font-black tracking-widest uppercase bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white shadow-md hover:shadow-emerald-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-1.5"
           >
-            Buy
+            <span>{isSubmitting ? '...' : 'Buy'}</span>
           </button>
           <button
+            disabled={marketStatus !== 'OPEN' || isSubmitting}
             onClick={() => handleOrder('SELL')}
-            className="flex-1 h-9 rounded-lg text-xs font-semibold tracking-wider uppercase border border-[color:var(--border-strong)] text-[color:var(--foreground-secondary)] hover:border-[color:var(--danger)] hover:text-[color:var(--danger)] transition-colors"
+            className="flex-1 h-11 rounded-xl text-xs font-black tracking-widest uppercase bg-rose-600 hover:bg-rose-500 active:scale-[0.98] text-white shadow-md hover:shadow-rose-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-1.5"
           >
-            Sell
+            <span>{isSubmitting ? '...' : 'Sell'}</span>
           </button>
           {currentPos && (
             <button
+              disabled={marketStatus !== 'OPEN'}
               onClick={handleClose}
               aria-label={`Close ${currentPos.side} position`}
-              className="flex-1 h-9 rounded-lg text-xs font-semibold tracking-wider uppercase border border-[color:var(--border-strong)] text-[color:var(--foreground-muted)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] transition-colors"
+              className="px-4 h-11 rounded-xl text-xs font-bold tracking-wider uppercase border border-[color:var(--border-strong)] bg-[color:var(--surface-muted)] text-[color:var(--foreground)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
             >
               Close
             </button>
           )}
         </div>
-        {orderError && <p role="alert" className="text-[11px] text-[color:var(--danger)]">{orderError}</p>}
-        {orderSuccess && <p role="status" className="text-[11px] text-[color:var(--success)]">{orderSuccess}</p>}
+
+        {orderError && (
+          <div className="p-2.5 rounded-lg bg-[color:var(--danger)]/10 border border-[color:var(--danger)]/30 text-xs font-medium text-[color:var(--danger)] text-center">
+            {orderError}
+          </div>
+        )}
+        {orderSuccess && (
+          <div className="p-2.5 rounded-lg bg-[color:var(--success)]/10 border border-[color:var(--success)]/30 text-xs font-medium text-[color:var(--success)] text-center">
+            {orderSuccess}
+          </div>
+        )}
       </div>
 
       {/* Flip warning modal */}
