@@ -24,6 +24,7 @@ export async function login(req: LoginRequest): Promise<LoginResponse> {
 
     return {
       token: data.access_token,
+      refreshToken: data.refresh_token,
       participant: {
         id: data.user.user_id,
         participantId: data.user.participant_id,
@@ -62,6 +63,7 @@ export async function register(req: RegisterRequestPayload): Promise<LoginRespon
 
     return {
       token: data.access_token,
+      refreshToken: data.refresh_token,
       participant: {
         id: data.user.user_id,
         participantId: data.user.participant_id,

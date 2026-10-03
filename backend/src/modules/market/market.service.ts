@@ -190,7 +190,7 @@ export class MarketService {
     const currentDay = simState?.simulationDay || 1;
     const currentInterval = simState?.intervalIndex || 0;
 
-    // Get latest candle up to current simulation cursor
+    // Get latest candle up to current simulation cursor (including Day 0 baseline)
     const [latestCandle] = await this.db
       .select()
       .from(schema.datasetCandles)
@@ -198,14 +198,13 @@ export class MarketService {
         and(
           activeEvent?.datasetId ? eq(schema.datasetCandles.datasetId, activeEvent.datasetId) : undefined,
           eq(schema.datasetCandles.instrumentId, inst.id),
-          eq(schema.datasetCandles.tradingDay, currentDay),
-          lte(schema.datasetCandles.intervalIndex, currentInterval)
+          sql`(${schema.datasetCandles.tradingDay} = 0 OR ${schema.datasetCandles.tradingDay} < ${currentDay} OR (${schema.datasetCandles.tradingDay} = ${currentDay} AND ${schema.datasetCandles.intervalIndex} <= ${currentInterval}))`
         )
       )
-      .orderBy(desc(schema.datasetCandles.intervalIndex))
+      .orderBy(desc(schema.datasetCandles.tradingDay), desc(schema.datasetCandles.intervalIndex))
       .limit(1);
 
-    // Fallback if simulation day 1 has no interval yet: fetch candle 0 of day 1
+    // Fallback if simulation day 1 has no interval yet: fetch candle 0 of day 1 or day 0
     const candle = latestCandle || (await this.db
       .select()
       .from(schema.datasetCandles)
@@ -239,7 +238,7 @@ export class MarketService {
     const lastPrice = new Decimal(candle.close);
     const openPrice = firstDayCandle ? new Decimal(firstDayCandle.open) : lastPrice;
     let prevClose = openPrice;
-    if (candle.tradingDay > 1) {
+    if (candle.tradingDay >= 1) {
       const [prevCandle] = await this.db
         .select()
         .from(schema.datasetCandles)
@@ -308,7 +307,7 @@ export class MarketService {
         and(
           activeEvent?.datasetId ? eq(schema.datasetCandles.datasetId, activeEvent.datasetId) : undefined,
           eq(schema.datasetCandles.instrumentId, inst.id),
-          sql`(${schema.datasetCandles.tradingDay} < ${currentDay} OR (${schema.datasetCandles.tradingDay} = ${currentDay} AND ${schema.datasetCandles.intervalIndex} <= ${currentInterval}))`
+          sql`(${schema.datasetCandles.tradingDay} = 0 OR ${schema.datasetCandles.tradingDay} < ${currentDay} OR (${schema.datasetCandles.tradingDay} = ${currentDay} AND ${schema.datasetCandles.intervalIndex} <= ${currentInterval}))`
         )
       )
       .orderBy(desc(schema.datasetCandles.tradingDay), desc(schema.datasetCandles.intervalIndex))
@@ -317,7 +316,7 @@ export class MarketService {
     // Reverse to chronological order (oldest to newest)
     rows = rows.reverse();
 
-    // If simulation hasn't started or is at interval 0, return the first opening candle of day 1
+    // If simulation hasn't started or is at interval 0 and no rows, return Day 0 or Day 1 candle 0
     if (rows.length === 0) {
       rows = await this.db
         .select()
@@ -326,11 +325,11 @@ export class MarketService {
           and(
             activeEvent?.datasetId ? eq(schema.datasetCandles.datasetId, activeEvent.datasetId) : undefined,
             eq(schema.datasetCandles.instrumentId, inst.id),
-            eq(schema.datasetCandles.tradingDay, 1),
-            eq(schema.datasetCandles.intervalIndex, 0)
+            sql`${schema.datasetCandles.tradingDay} <= 1`
           )
         )
-        .limit(1);
+        .orderBy(asc(schema.datasetCandles.tradingDay), asc(schema.datasetCandles.intervalIndex))
+        .limit(72);
     }
 
     return rows.map((r) => ({

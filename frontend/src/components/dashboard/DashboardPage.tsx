@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, Circle } from 'lucide-react';
-import { getPortfolioSummary } from '../../lib/api/portfolio';
+import { getPortfolioSummary, normalizePortfolioSummary } from '../../lib/api/portfolio';
 import { getMarketState } from '../../lib/api/market';
 import { getLeaderboard } from '../../lib/api/leaderboard';
 import type { PortfolioSummary } from '../../contracts/v1/portfolio';
@@ -14,7 +14,7 @@ import { api } from '../../lib/api/client';
 import { wsClient } from '../../lib/websocket';
 
 function fmt(n: number) {
-  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(n));
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(n || 0));
 }
 
 interface NewsItem {
@@ -68,8 +68,8 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
     });
     const unsubPort = wsClient.subscribe('portfolio', (payload: any) => {
       const data = payload?.data || payload;
-      if (data && (data.totalPnl !== undefined || data.total_pnl !== undefined)) {
-        setPortfolio(data);
+      if (data) {
+        setPortfolio(normalizePortfolioSummary(data));
       } else {
         getPortfolioSummary().then(setPortfolio).catch(() => {});
       }
@@ -131,29 +131,29 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
             <div className="flex items-end gap-3">
               <span
                 className={`text-4xl font-bold tabular-nums leading-none ${
-                  portfolio.totalPnl >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
+                  (portfolio.totalPnl ?? 0) >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
                 }`}
               >
-                {portfolio.totalPnl >= 0 ? '+' : '−'}₹{fmt(portfolio.totalPnl)}
+                {(portfolio.totalPnl ?? 0) >= 0 ? '+' : '−'}₹{fmt(portfolio.totalPnl ?? 0)}
               </span>
               <span
                 className={`text-sm font-medium tabular-nums mb-0.5 ${
-                  portfolio.totalPnl >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
+                  (portfolio.totalPnl ?? 0) >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
                 }`}
               >
-                {portfolio.totalPnl >= 0 ? '+' : '−'}{Math.abs(portfolio.totalPnlPct).toFixed(2)}%
+                {(portfolio.totalPnl ?? 0) >= 0 ? '+' : '−'}{Math.abs(portfolio.totalPnlPct ?? 0).toFixed(2)}%
               </span>
             </div>
             <div className="mt-4 pt-4 border-t border-[color:var(--border)] flex justify-between items-center">
               <div>
                 <p className="text-[10px] text-[color:var(--foreground-muted)] uppercase tracking-wider">Today</p>
-                <p className={`text-sm font-medium tabular-nums ${portfolio.todayPnl >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}>
-                  {portfolio.todayPnl >= 0 ? '+' : '−'}₹{fmt(portfolio.todayPnl)}
+                <p className={`text-sm font-medium tabular-nums ${(portfolio.todayPnl ?? 0) >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}>
+                  {(portfolio.todayPnl ?? 0) >= 0 ? '+' : '−'}₹{fmt(portfolio.todayPnl ?? 0)}
                 </p>
               </div>
               <div className="text-right">
                 <p className="text-[10px] text-[color:var(--foreground-muted)] uppercase tracking-wider">Win Rate</p>
-                <p className="text-sm font-medium text-[color:var(--foreground)] tabular-nums">{portfolio.winRate}%</p>
+                <p className="text-sm font-medium text-[color:var(--foreground)] tabular-nums">{portfolio.winRate ?? 0}%</p>
               </div>
             </div>
           </div>
@@ -164,7 +164,7 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
               Current Balance
             </p>
             <p className="text-3xl font-bold text-[color:var(--foreground)] tabular-nums">
-              ₹{fmt(portfolio.currentBalance)}
+              ₹{fmt(portfolio.currentBalance ?? 1000000)}
             </p>
           </div>
 

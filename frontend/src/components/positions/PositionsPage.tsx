@@ -28,10 +28,10 @@ export default function PositionsPage() {
 
   useEffect(() => {
     load();
-    const unsubPort = wsClient.subscribe('portfolio', () => {
+    const unsubOrder = wsClient.subscribe('orders', () => {
       getPositions().then(setPositions).catch(() => {});
     });
-    const unsubOrder = wsClient.subscribe('order', () => {
+    const unsubPos = wsClient.subscribe('positions', () => {
       getPositions().then(setPositions).catch(() => {});
     });
     const unsubMarket = wsClient.subscribe('market', (tick: any) => {
@@ -43,18 +43,21 @@ export default function PositionsPage() {
       setPositions((prev) =>
         prev.map((pos) => {
           if (pos.symbol.toUpperCase() === data.symbol.toUpperCase()) {
-            const entry = parseFloat(pos.entry_price || pos.average_entry_price || '0');
-            const qty = pos.quantity || 0;
+            const entry = pos.avgPrice ?? 0;
+            const qty = pos.quantity ?? 0;
             let unrealized = 0;
-            if (pos.side === 'LONG' || pos.side === 'BUY') {
+            if (pos.side === 'LONG') {
               unrealized = (latestPrice - entry) * qty;
-            } else if (pos.side === 'SHORT' || pos.side === 'SELL') {
+            } else if (pos.side === 'SHORT') {
               unrealized = (entry - latestPrice) * qty;
             }
+            const invested = entry * qty;
+            const pnlPct = invested > 0 ? (unrealized / invested) * 100 : 0;
             return {
               ...pos,
-              current_price: latestPrice.toFixed(2),
-              unrealized_pnl: unrealized.toFixed(2),
+              ltp: latestPrice,
+              pnl: parseFloat(unrealized.toFixed(2)),
+              pnlPct: parseFloat(pnlPct.toFixed(2)),
             };
           }
           return pos;
@@ -63,8 +66,8 @@ export default function PositionsPage() {
     });
 
     return () => {
-      unsubPort();
       unsubOrder();
+      unsubPos();
       unsubMarket();
     };
   }, []);

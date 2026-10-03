@@ -1,4 +1,5 @@
 import { eq, desc, and } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { Decimal } from 'decimal.js';
 import type { Database } from '../../db/client.js';
 import * as schema from '../../db/schema/index.js';
@@ -285,9 +286,8 @@ export class SimulationWorker {
           equityVal: equity.toNumber(),
         };
 
-        // Broadcast directly to user and channel every 2 seconds
+        // Send portfolio data directly to the owning user only (not broadcast to all)
         this.wsGateway.sendToUser(port.userId, 'portfolio', portfolioPayload);
-        this.wsGateway.broadcast('portfolio', portfolioPayload);
       }
 
       // Advance sub-tick or interval every 2s
@@ -297,16 +297,66 @@ export class SimulationWorker {
         const nextInterval = currentInterval + 1;
 
         if (nextInterval >= 72) {
-          const nextDay = currentDay + 1 > (activeEvent.totalSimulationDays || 20) ? 1 : currentDay + 1;
+          // 12-minute trading day session completed! Close the day and pause for Admin.
           await this.db
             .update(schema.simulationStates)
             .set({
-              simulationDay: nextDay,
-              intervalIndex: 0,
+              dayStatus: 'CLOSED',
+              marketStatus: 'CLOSED',
+              intervalIndex: 71,
               lastCommittedAt: new Date(),
               updatedAt: new Date(),
             })
             .where(eq(schema.simulationStates.eventId, activeEvent.id));
+
+          // Post official News item in DB
+          try {
+            const [adminUser] = await this.db
+              .select({ id: schema.users.id })
+              .from(schema.users)
+              .where(eq(schema.users.role, 'ADMIN'))
+              .limit(1);
+
+            const newsPublicId = `news_${randomUUID()}`;
+            const title = `🔔 Trading Day ${currentDay} Ended — Market Closed`;
+            const body = `Trading Day ${currentDay} (12-minute session) has officially closed. All intraday orders are finalized. Waiting for Admin announcements before Day ${currentDay + 1} begins.`;
+
+            const [newsItem] = await this.db
+              .insert(schema.news)
+              .values({
+                publicId: newsPublicId,
+                authorUserId: adminUser?.id,
+                type: 'CRITICAL',
+                title,
+                body,
+                audience: 'ALL_PARTICIPANTS',
+              })
+              .returning();
+
+            // Broadcast to all Traders and Admin via WebSocket
+            this.wsGateway.broadcast('market_status', {
+              status: 'CLOSED',
+              day_status: 'CLOSED',
+              simulation_day: currentDay,
+              event_status: 'RUNNING',
+              message: `Trading Day ${currentDay} has concluded. Market is now CLOSED.`,
+            });
+
+            if (newsItem) {
+              this.wsGateway.broadcast('news', {
+                news_id: newsItem.publicId,
+                type: newsItem.type,
+                title: newsItem.title,
+                body: newsItem.body,
+                published_at: newsItem.publishedAt.toISOString(),
+              });
+            }
+
+            // Compute and save leaderboard snapshot at day close
+            await this.computeLeaderboardSnapshot(activeEvent.id, currentDay);
+          } catch (err) {
+            console.error('[SimWorker] Day-close processing error:', err);
+          }
         } else {
           await this.db
             .update(schema.simulationStates)
@@ -318,8 +368,129 @@ export class SimulationWorker {
             .where(eq(schema.simulationStates.eventId, activeEvent.id));
         }
       }
-    } catch {
-      // Ignored: worker continues next tick
+    } catch (err) {
+      console.error('[SimWorker] tick() failed:', err);
+    }
+  }
+
+  /**
+   * Compute leaderboard from current DB state and save as a snapshot.
+   * Uses batch queries instead of N+1 loops.
+   */
+  private async computeLeaderboardSnapshot(eventId: string, day: number): Promise<void> {
+    try {
+      // 1. Fetch all participants with their portfolios in one query
+      const users = await this.db
+        .select({
+          userId: schema.users.id,
+          publicId: schema.users.publicId,
+          participantId: schema.users.participantId,
+          displayName: schema.users.displayName,
+          startingCapital: schema.portfolios.startingCapital,
+          availableCash: schema.portfolios.availableCash,
+          reservedCash: schema.portfolios.reservedCash,
+          realizedPnl: schema.portfolios.realizedPnl,
+        })
+        .from(schema.users)
+        .innerJoin(schema.portfolios, eq(schema.users.id, schema.portfolios.userId))
+        .where(eq(schema.users.role, 'PARTICIPANT'));
+
+      // 2. Fetch all open positions with instrument info in one query
+      const allPositions = await this.db
+        .select({
+          userId: schema.positions.userId,
+          symbol: schema.instruments.symbol,
+          side: schema.positions.side,
+          quantity: schema.positions.quantity,
+          averageEntryPrice: schema.positions.averageEntryPrice,
+        })
+        .from(schema.positions)
+        .innerJoin(schema.instruments, eq(schema.positions.instrumentId, schema.instruments.id))
+        .where(eq(schema.positions.eventId, eventId));
+
+      // 3. Group positions by userId
+      const positionsByUser = new Map<string, typeof allPositions>();
+      for (const pos of allPositions) {
+        const existing = positionsByUser.get(pos.userId) || [];
+        existing.push(pos);
+        positionsByUser.set(pos.userId, existing);
+      }
+
+      // 4. Compute leaderboard entries
+      const entries = users.map((user) => {
+        const startCap = new Decimal(user.startingCapital || '1000000');
+        const availCash = new Decimal(user.availableCash || '1000000');
+        const reserved = new Decimal(user.reservedCash || '0');
+        const realizedPnl = new Decimal(user.realizedPnl || '0');
+
+        let unrealizedPnl = new Decimal(0);
+        let marketValue = new Decimal(0);
+        const userPositions = positionsByUser.get(user.userId) || [];
+
+        for (const pos of userPositions) {
+          if (pos.quantity > 0 && pos.side && pos.averageEntryPrice) {
+            const cached = livePriceCache.getBySymbol(pos.symbol);
+            const curPrice = cached ? cached.price : new Decimal(pos.averageEntryPrice);
+            const avgPrice = new Decimal(pos.averageEntryPrice);
+            const qty = new Decimal(pos.quantity);
+
+            if (pos.side === 'LONG') {
+              marketValue = marketValue.plus(curPrice.times(qty));
+              unrealizedPnl = unrealizedPnl.plus(curPrice.minus(avgPrice).times(qty));
+            } else if (pos.side === 'SHORT') {
+              marketValue = marketValue.plus(avgPrice.times(qty));
+              unrealizedPnl = unrealizedPnl.plus(avgPrice.minus(curPrice).times(qty));
+            }
+          }
+        }
+
+        const equity = availCash.plus(reserved).plus(marketValue);
+        const totalPnl = realizedPnl.plus(unrealizedPnl);
+        const totalPnlPct = startCap.isZero() ? new Decimal(0) : totalPnl.dividedBy(startCap).times(100);
+
+        return {
+          user_id: user.publicId,
+          participant_id: user.participantId,
+          display_name: user.displayName,
+          starting_capital: startCap.toFixed(2),
+          equity: equity.toFixed(2),
+          total_pnl: totalPnl.toFixed(2),
+          total_pnl_percent: totalPnlPct.toFixed(2),
+          trades_count: 0,
+        };
+      });
+
+      // 5. Sort by equity descending and assign ranks
+      entries.sort((a, b) => parseFloat(b.equity) - parseFloat(a.equity));
+      const rankedEntries = entries.map((e, idx) => ({ ...e, rank: idx + 1 }));
+
+      // 6. Get next snapshot version
+      const [lastSnapshot] = await this.db
+        .select({ version: schema.leaderboardSnapshots.version })
+        .from(schema.leaderboardSnapshots)
+        .where(eq(schema.leaderboardSnapshots.eventId, eventId))
+        .orderBy(desc(schema.leaderboardSnapshots.version))
+        .limit(1);
+      const nextVersion = (lastSnapshot?.version || 0) + 1;
+
+      // 7. Save snapshot
+      await this.db.insert(schema.leaderboardSnapshots).values({
+        eventId,
+        version: nextVersion,
+        simulationDay: day,
+        snapshot: rankedEntries,
+      });
+
+      // 8. Broadcast leaderboard update
+      this.wsGateway.broadcast('leaderboard', {
+        day,
+        version: nextVersion,
+        entries: rankedEntries,
+      });
+
+      console.log(`[SimWorker] Leaderboard snapshot saved: Day ${day}, Version ${nextVersion}, ${rankedEntries.length} participants`);
+    } catch (err) {
+      console.error('[SimWorker] Failed to compute leaderboard snapshot:', err);
     }
   }
 }

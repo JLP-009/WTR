@@ -30,9 +30,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const [token, setToken] = useState<string | null>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_TOKEN_KEY);
-      if (saved) setAuthToken(saved);
-      return saved;
+      const savedToken = localStorage.getItem(STORAGE_TOKEN_KEY);
+      const savedRefresh = localStorage.getItem('wtr_refresh_token');
+      if (savedToken) setAuthToken(savedToken, savedRefresh);
+      return savedToken;
     } catch {
       return null;
     }
@@ -42,9 +43,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const res = await apiLogin({ participantId, password });
     setParticipant(res.participant);
     setToken(res.token);
-    setAuthToken(res.token);
+    setAuthToken(res.token, res.refreshToken);
     try {
-      localStorage.setItem(STORAGE_TOKEN_KEY, res.token);
       localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(res.participant));
     } catch {}
   };
@@ -53,9 +53,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const res = await apiRegister(payload);
     setParticipant(res.participant);
     setToken(res.token);
-    setAuthToken(res.token);
+    setAuthToken(res.token, res.refreshToken);
     try {
-      localStorage.setItem(STORAGE_TOKEN_KEY, res.token);
       localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(res.participant));
     } catch {}
   };
@@ -64,9 +63,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     apiLogout().catch(() => {});
     setParticipant(null);
     setToken(null);
-    setAuthToken(null);
+    setAuthToken(null, null);
     try {
-      localStorage.removeItem(STORAGE_TOKEN_KEY);
       localStorage.removeItem(STORAGE_USER_KEY);
     } catch {}
   };

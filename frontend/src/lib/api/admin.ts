@@ -216,6 +216,7 @@ export async function nextDay(_key: string = generateIdempotencyKey()): Promise<
   }
 }
 export const nextDayAdmin = nextDay;
+export const advanceAdminSimulationDay = nextDay;
 
 // ---------------------------------------------------------------------------
 // Market Controls

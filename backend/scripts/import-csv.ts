@@ -55,6 +55,11 @@ export async function importPath(targetPath: string, datasetName: string = 'mast
     .from(schema.datasets)
     .where(and(eq(schema.datasets.name, datasetName), eq(schema.datasets.version, '1.0.0'))))[0];
 
+  // Clean existing candles for this dataset
+  await db
+    .delete(schema.datasetCandles)
+    .where(eq(schema.datasetCandles.datasetId, datasetRecord.id));
+
   const instrumentCache = new Map<string, string>();
   let totalCandlesInserted = 0;
   let maxDay = 1;
@@ -162,6 +167,46 @@ export async function importPath(targetPath: string, datasetName: string = 'mast
         close,
         volume,
       });
+    }
+
+    // If CSV has no Day 0, synthesize 72 Day 0 baseline reference candles ending at Day 1's open
+    const hasDay0 = rowsToInsert.some((r) => r.tradingDay === 0);
+    if (!hasDay0 && rowsToInsert.length > 0) {
+      const day1Open = parseFloat(rowsToInsert[0].open || '100.00');
+      let currentPrice = day1Open * 0.995; // Start 0.5% below day 1 open and trend towards it
+      const instrumentId = instrumentCache.get(fileSymbol)!;
+      const day0Rows: schema.DatasetCandle[] = [];
+
+      for (let idx = 0; idx < 72; idx++) {
+        const stepTarget = day1Open;
+        const progress = (idx + 1) / 72;
+        const drift = (stepTarget - currentPrice) * (progress * 0.15);
+        const noise = (Math.sin(idx * 0.5) + (Math.random() - 0.5) * 0.4) * (day1Open * 0.001);
+        
+        const open = currentPrice;
+        let close = idx === 71 ? day1Open : currentPrice + drift + noise;
+        const high = Math.max(open, close) + Math.abs(noise) * 0.8;
+        const low = Math.min(open, close) - Math.abs(noise) * 0.8;
+        currentPrice = close;
+
+        const timestamp = new Date(Date.UTC(2026, 0, 0, 3, 45, idx * 10));
+
+        day0Rows.push({
+          id: undefined as any,
+          datasetId: datasetRecord.id,
+          instrumentId,
+          tradingDay: 0,
+          intervalIndex: idx,
+          timestamp,
+          open: open.toFixed(2),
+          high: high.toFixed(2),
+          low: low.toFixed(2),
+          close: close.toFixed(2),
+          volume: Math.floor(1000 + Math.random() * 2500),
+        });
+      }
+
+      rowsToInsert.unshift(...day0Rows);
     }
 
     // Bulk insert in chunks of 500

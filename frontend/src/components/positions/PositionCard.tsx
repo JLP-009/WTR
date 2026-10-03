@@ -8,12 +8,12 @@ interface PositionCardProps {
 }
 
 function fmt(n: number) {
-  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(n));
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(n || 0));
 }
 
 export default function PositionCard({ position, onClosed }: PositionCardProps) {
   const [closing, setClosing] = useState(false);
-  const profit = position.pnl >= 0;
+  const profit = (position.pnl ?? 0) >= 0;
 
   const handleClose = async () => {
     setClosing(true);
@@ -41,18 +41,18 @@ export default function PositionCard({ position, onClosed }: PositionCardProps) 
             </span>
           </div>
           <p className="text-xs text-[color:var(--foreground-muted)] mt-0.5">
-            {position.quantity} shares
+            {position.quantity ?? 0} shares
           </p>
         </div>
         <div className="text-right">
           <p
             className={`text-lg font-bold tabular-nums leading-none ${profit ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}
-            aria-label={`Unrealized P&L: ${profit ? 'gain' : 'loss'} ₹${fmt(position.pnl)}`}
+            aria-label={`Unrealized P&L: ${profit ? 'gain' : 'loss'} ₹${fmt(position.pnl ?? 0)}`}
           >
-            {profit ? '+' : '−'}₹{fmt(position.pnl)}
+            {profit ? '+' : '−'}₹{fmt(position.pnl ?? 0)}
           </p>
           <p className={`text-xs tabular-nums mt-0.5 ${profit ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}>
-            {profit ? '+' : '−'}{Math.abs(position.pnlPct).toFixed(2)}%
+            {profit ? '+' : '−'}{Math.abs(position.pnlPct ?? 0).toFixed(2)}%
           </p>
         </div>
       </div>
@@ -61,16 +61,16 @@ export default function PositionCard({ position, onClosed }: PositionCardProps) 
       <div className="grid grid-cols-3 gap-2 mb-3">
         <div>
           <p className="text-[10px] text-[color:var(--foreground-muted)] uppercase tracking-wider">Avg Price</p>
-          <p className="text-xs font-medium tabular-nums text-[color:var(--foreground-secondary)] mt-0.5">₹{fmt(position.avgPrice)}</p>
+          <p className="text-xs font-medium tabular-nums text-[color:var(--foreground-secondary)] mt-0.5">₹{fmt(position.avgPrice ?? 0)}</p>
         </div>
         <div>
           <p className="text-[10px] text-[color:var(--foreground-muted)] uppercase tracking-wider">Current</p>
-          <p className="text-xs font-medium tabular-nums text-[color:var(--foreground-secondary)] mt-0.5">₹{fmt(position.ltp)}</p>
+          <p className="text-xs font-medium tabular-nums text-[color:var(--foreground-secondary)] mt-0.5">₹{fmt(position.ltp ?? 0)}</p>
         </div>
         <div className="text-right">
           <p className="text-[10px] text-[color:var(--foreground-muted)] uppercase tracking-wider">Unr. P&L</p>
           <p className={`text-xs font-semibold tabular-nums mt-0.5 ${profit ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'}`}>
-            {profit ? '+' : '−'}₹{fmt(position.pnl)}
+            {profit ? '+' : '−'}₹{fmt(position.pnl ?? 0)}
           </p>
         </div>
       </div>

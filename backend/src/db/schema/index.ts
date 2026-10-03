@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, integer, jsonb, numeric, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, jsonb, numeric, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const money = (name: string) => numeric(name, { precision: 24, scale: 8 });
 const auditTime = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' }).notNull().defaultNow();
@@ -37,7 +37,7 @@ export const instruments = pgTable('instruments', {
 
 export const datasetCandles = pgTable('dataset_candles', {
   id: uuid('id').primaryKey().defaultRandom(), datasetId: uuid('dataset_id').notNull().references(() => datasets.id), instrumentId: uuid('instrument_id').notNull().references(() => instruments.id), tradingDay: integer('trading_day').notNull(), intervalIndex: integer('interval_index').notNull(), timestamp: timestamp('timestamp', { withTimezone: true, mode: 'date' }).notNull(), open: money('open').notNull(), high: money('high').notNull(), low: money('low').notNull(), close: money('close').notNull(), volume: integer('volume').notNull(),
-}, (t) => [uniqueIndex('dataset_candles_interval_unique').on(t.datasetId, t.instrumentId, t.tradingDay, t.intervalIndex), check('dataset_candles_invariants', sql`${t.tradingDay} > 0 AND ${t.intervalIndex} >= 0 AND ${t.volume} >= 0 AND ${t.low} <= ${t.open} AND ${t.low} <= ${t.close} AND ${t.high} >= ${t.open} AND ${t.high} >= ${t.close}`)]);
+}, (t) => [uniqueIndex('dataset_candles_interval_unique').on(t.datasetId, t.instrumentId, t.tradingDay, t.intervalIndex), check('dataset_candles_invariants', sql`${t.tradingDay} >= 0 AND ${t.intervalIndex} >= 0 AND ${t.volume} >= 0 AND ${t.low} <= ${t.open} AND ${t.low} <= ${t.close} AND ${t.high} >= ${t.open} AND ${t.high} >= ${t.close}`)]);
 
 export const events = pgTable('events', {
   id: uuid('id').primaryKey().defaultRandom(), publicId: text('public_id').notNull(), datasetId: uuid('dataset_id').references(() => datasets.id), status: eventStatus('status').notNull().default('SETUP'), totalSimulationDays: integer('total_simulation_days'), simulationSpeed: integer('simulation_speed').notNull().default(1), configLocked: boolean('config_locked').notNull().default(false), createdAt: auditTime('created_at'), updatedAt: auditTime('updated_at'), endedAt: timestamp('ended_at', { withTimezone: true, mode: 'date' }),
@@ -61,11 +61,24 @@ export const positions = pgTable('positions', {
 
 export const orders = pgTable('orders', {
   id: uuid('id').primaryKey().defaultRandom(), publicId: text('public_id').notNull(), eventId: uuid('event_id').notNull().references(() => events.id), userId: uuid('user_id').notNull().references(() => users.id), instrumentId: uuid('instrument_id').notNull().references(() => instruments.id), clientOrderId: text('client_order_id').notNull(), side: orderSide('side').notNull(), quantity: integer('quantity').notNull(), filledQuantity: integer('filled_quantity').notNull().default(0), orderType: text('order_type').notNull().default('MARKET'), status: orderStatus('status').notNull().default('PENDING'), averagePrice: money('average_price'), idempotencyKey: text('idempotency_key').notNull(), createdAt: auditTime('created_at'), updatedAt: auditTime('updated_at'),
-}, (t) => [uniqueIndex('orders_public_id_unique').on(t.publicId), uniqueIndex('orders_client_order_unique').on(t.eventId, t.userId, t.clientOrderId), uniqueIndex('orders_idempotency_unique').on(t.userId, t.idempotencyKey), check('orders_quantity_valid', sql`${t.quantity} > 0 AND ${t.filledQuantity} >= 0 AND ${t.filledQuantity} <= ${t.quantity}`)]);
+}, (t) => [
+  uniqueIndex('orders_public_id_unique').on(t.publicId), 
+  uniqueIndex('orders_client_order_unique').on(t.eventId, t.userId, t.clientOrderId), 
+  uniqueIndex('orders_idempotency_unique').on(t.userId, t.idempotencyKey), 
+  check('orders_quantity_valid', sql`${t.quantity} > 0 AND ${t.filledQuantity} >= 0 AND ${t.filledQuantity} <= ${t.quantity}`),
+  index('orders_user_event_idx').on(t.userId, t.eventId),
+  index('orders_status_idx').on(t.status)
+]);
 
-export const executions = pgTable('executions', { id: uuid('id').primaryKey().defaultRandom(), publicId: text('public_id').notNull(), orderId: uuid('order_id').notNull().references(() => orders.id), quantity: integer('quantity').notNull(), price: money('price').notNull(), executedAt: auditTime('executed_at') }, (t) => [uniqueIndex('executions_public_id_unique').on(t.publicId), check('executions_positive_values', sql`${t.quantity} > 0 AND ${t.price} > 0`)]);
+export const executions = pgTable('executions', { id: uuid('id').primaryKey().defaultRandom(), publicId: text('public_id').notNull(), orderId: uuid('order_id').notNull().references(() => orders.id), quantity: integer('quantity').notNull(), price: money('price').notNull(), executedAt: auditTime('executed_at') }, (t) => [
+  uniqueIndex('executions_public_id_unique').on(t.publicId), 
+  check('executions_positive_values', sql`${t.quantity} > 0 AND ${t.price} > 0`),
+  index('executions_order_idx').on(t.orderId)
+]);
 
-export const portfolioLedgerEntries = pgTable('portfolio_ledger_entries', { id: uuid('id').primaryKey().defaultRandom(), portfolioId: uuid('portfolio_id').notNull().references(() => portfolios.id), orderId: uuid('order_id').references(() => orders.id), reason: ledgerReason('reason').notNull(), amount: money('amount').notNull(), balanceAfter: money('balance_after').notNull(), metadata: jsonb('metadata').notNull().default({}), createdAt: auditTime('created_at') });
+export const portfolioLedgerEntries = pgTable('portfolio_ledger_entries', { id: uuid('id').primaryKey().defaultRandom(), portfolioId: uuid('portfolio_id').notNull().references(() => portfolios.id), orderId: uuid('order_id').references(() => orders.id), reason: ledgerReason('reason').notNull(), amount: money('amount').notNull(), balanceAfter: money('balance_after').notNull(), metadata: jsonb('metadata').notNull().default({}), createdAt: auditTime('created_at') }, (t) => [
+  index('ledger_portfolio_idx').on(t.portfolioId)
+]);
 
 export const idempotencyRecords = pgTable('idempotency_records', { id: uuid('id').primaryKey().defaultRandom(), userId: uuid('user_id').notNull().references(() => users.id), key: text('key').notNull(), requestFingerprint: text('request_fingerprint').notNull(), responseStatus: integer('response_status').notNull(), responseBody: jsonb('response_body').notNull(), expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(), createdAt: auditTime('created_at') }, (t) => [uniqueIndex('idempotency_user_key_unique').on(t.userId, t.key)]);
 

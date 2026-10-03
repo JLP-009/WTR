@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { getPortfolioSummary } from '../../lib/api/portfolio';
+import { getPortfolioSummary, normalizePortfolioSummary } from '../../lib/api/portfolio';
+import { wsClient } from '../../lib/websocket';
 import type { PortfolioSummary } from '../../contracts/v1/portfolio';
 import { SkeletonCard } from '../common/LoadingState';
 import ErrorState from '../common/ErrorState';
 
 function fmt(n: number) {
-  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n);
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n || 0);
 }
 
 interface BalanceRowProps {
@@ -49,7 +50,18 @@ export default function BalancePage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const unsub = wsClient.subscribe('portfolio', (payload: any) => {
+      const data = payload?.data || payload;
+      if (data) {
+        setPortfolio(normalizePortfolioSummary(data));
+      } else {
+        getPortfolioSummary().then(setPortfolio).catch(() => {});
+      }
+    });
+    return () => unsub();
+  }, []);
 
   return (
     <div className="space-y-5">
@@ -67,20 +79,20 @@ export default function BalancePage() {
               Portfolio Value
             </p>
             <p className="text-4xl font-bold tabular-nums text-[color:var(--foreground)]">
-              ₹{fmt(portfolio.portfolioValue)}
+              ₹{fmt(portfolio.portfolioValue ?? 1000000)}
             </p>
             <p className="text-sm tabular-nums text-[color:var(--success)] mt-1.5 font-medium">
-              +{portfolio.totalReturn.toFixed(2)}% total return
+              +{(portfolio.totalReturn ?? 0).toFixed(2)}% total return
             </p>
           </div>
 
           {/* Breakdown */}
           <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-2xl px-4">
-            <BalanceRow label="Available Cash" value={`₹${fmt(portfolio.availableCash)}`} prominent />
-            <BalanceRow label="Invested Value" value={`₹${fmt(portfolio.investedValue)}`} prominent />
+            <BalanceRow label="Available Cash" value={`₹${fmt(portfolio.availableCash ?? 1000000)}`} prominent />
+            <BalanceRow label="Invested Value" value={`₹${fmt(portfolio.investedValue ?? 0)}`} prominent />
             <BalanceRow
               label="Total Return"
-              value={`+${portfolio.totalReturn.toFixed(2)}%`}
+              value={`+${(portfolio.totalReturn ?? 0).toFixed(2)}%`}
               valueColor="success"
             />
           </div>

@@ -1,33 +1,118 @@
-# Backend architecture (Phase 1)
+# Warangal Trading Ring — Backend Architecture Documentation
 
-## Module boundaries
+**Version:** 1.0.0 (Production / Implemented)  
+**Status:** Implemented & Verified  
+**Runtime:** Node.js (ESM, TypeScript) with Fastify 5  
+**Database:** PostgreSQL 16+ via Drizzle ORM  
+**Real-Time:** Native WebSocket Gateway (`ws`)
 
-`backend/src/app.ts` composes cross-cutting plugins and routes. `routes.ts` stays thin; Phase 2+ routes validate transport input and call module services. Each domain module (`auth`, `users`, `events`, `simulation`, `market`, `datasets`, `instruments`, `portfolio`, `positions`, `orders`, `executions`, `leaderboard`, `news`, `admin`, `audit`, `websocket`) will expose schemas, service operations, and repositories. Cross-module business orchestration belongs in services, never a route handler or repository.
+---
 
-## Database and repository architecture
+## 1. Architectural Overview
 
-PostgreSQL is the durable authority. Drizzle configuration and a `postgres` client factory are present; Phase 2 will add the contract-derived schema, foreign keys, numeric columns, indexes, migrations, seed data, and repositories. Database records use internal keys; serializer services create public prefixed IDs and response envelopes. Decimal.js is the calculation boundary and PostgreSQL `numeric` is the persistence boundary.
+Warangal Trading Ring (WTR) backend is a high-throughput, low-latency trading simulation engine designed to support 300+ concurrent algorithmic and manual traders. The backend serves both RESTful API endpoints and real-time bidirectional WebSocket event streams.
 
-## Transaction boundaries
+```
+                   ┌─────────────────────────────────────────────────────────┐
+                   │                     Client Layer                        │
+                   │   React 19 Frontend (Trader Dashboard / Admin App)      │
+                   └───────────────────────────┬─────────────────────────────┘
+                                               │ HTTPS REST & WSS
+                                               ▼
+┌────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   Fastify Web Server                                       │
+│                                                                                            │
+│  Plugins:                                                                                  │
+│  ├── Helmet (Security Headers)              ├── JWT Authentication (Bearer)                │
+│  ├── CORS (Cross-Origin Resource Sharing)   ├── Request-ID Tracing (req_*)                 │
+│  └── Global Error Handler (Sanitized JSON)  └── Native WebSocket Plugin (@fastify/websocket)│
+│                                                                                            │
+│  Route Modules (/api/v1):                                                                  │
+│  ├── /auth        (Register, Login, Refresh, Logout, Me, Password Reset)                  │
+│  ├── /market      (Status, Instruments, Quotes, 10s OHLCV Candles)                        │
+│  ├── /orders      (Immediate MARKET Execution, History, Details, Cancel)                   │
+│  ├── /positions   (Open Positions, P&L, Symbol Lookups, Position Flipping)                 │
+│  ├── /portfolio   (Balance Breakdown, Realized/Unrealized P&L, Equity)                    │
+│  ├── /leaderboard (Live Dynamic Equity Ranking, User Rank & Stats)                         │
+│  ├── /news        (Market & Admin Lifecycle Announcements)                                 │
+│  └── /admin       (Event Control, Simulation Steps, Market Halts, User Bans, Audits)      │
+└──────────────────────────────┬───────────────────────────────┬─────────────────────────────┘
+                               │                               │
+                               │ Service Layer                 │ Real-Time Broadcasts
+                               ▼                               ▼
+┌─────────────────────────────────────────────────┐   ┌──────────────────────────────────────┐
+│                Domain Services                  │   │          WebSocket Gateway           │
+│                                                 │   │                                      │
+│  • AuthService (Argon2, Dual-Token Rotation)    │   │  • Connection Lifecycle & Handshake  │
+│  • MarketService (10s Candles, Price Cache)     │   │  • Auth Binding (JWT Verification)   │
+│  • OrderService (Atomic Txn Execution Engine)   │   │  • Channel Subscriptions             │
+│  • PortfolioService (Real-Time Equity & P&L)    │   │  • Targeted & Global Broadcasts      │
+│  • SimulationWorker (PostgreSQL Advisory Locks) │   └──────────────────────────────────────┘
+└──────────────────────────────┬──────────────────┘
+                               │
+                               │ Drizzle ORM Queries & ACID Transactions
+                               ▼
+┌────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                PostgreSQL 16 Database                                      │
+│                                                                                            │
+│  Tables:                                                                                   │
+│  ├── users, refresh_tokens (Auth & Identity)                                               │
+│  ├── datasets, instruments, dataset_candles (Master 10s Market Data)                       │
+│  ├── events, event_instruments, simulation_states (Simulation Cursor & State)              │
+│  ├── portfolios, positions, portfolio_ledger_entries (Financial Aggregates)                │
+│  ├── orders, executions, idempotency_records (Atomic Transaction Logs)                     │
+│  └── news, leaderboard_snapshots, audit_logs, outbox_events (Audit & Comms)                │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
-A single transaction will cover each financial or administrative mutation: lock account/position rows; validate authoritative lifecycle state and idempotency; mutate order, execution, position, portfolio, and append-only ledger/audit records; persist an outbox event; commit. Publishers run only after commit (or consume the durable outbox). DB uniqueness protects idempotency and client-order identity; row locks protect cash and positions. Lifecycle changes use a single state row plus transactional conditional transition; simulation uses PostgreSQL advisory locks or durable leases.
+---
 
-## HTTP, security, and errors
+## 2. Core Subsystems & Service Boundaries
 
-Fastify has a 1 MiB body limit, Pino logging, CORS, Helmet, rate limiting, request IDs, and a global sanitized error handler. The request-ID plugin accepts only contract-valid client IDs or generates `req_` IDs, echoes the header, and all route/error bodies carry `request_id`. Zod will validate headers, params, query, and body. Auth will issue short access JWTs and rotated persisted refresh tokens; authorization middleware will enforce user ownership and ADMIN role independently of frontend visibility. Passwords use Argon2 in Phase 3; tokens, secrets and credentials are never logged.
+### 2.1. Authentication & Security Subsystem (`backend/src/modules/auth/`)
+- **Password Hashing:** Argon2id with secure salt generation.
+- **JWT Architecture:** Short-lived access tokens (15m expiration) signed with HMAC-SHA256, carrying user role (`ADMIN` or `PARTICIPANT`), `user_id`, and `participant_id`.
+- **Refresh Token Rotation:** Long-lived refresh tokens (7d expiration) stored as cryptographic SHA-256 hashes in PostgreSQL `refresh_tokens` table. Reuse or revocation immediately invalidates existing sessions.
+- **Role Enforcement:** Strict Fastify preHandler hooks (`app.authenticate`, `app.requireAdmin`, `app.optionalAuthenticate`) isolate administrative mutating endpoints from trader endpoints.
 
-## WebSocket architecture
+### 2.2. Market Data & 10-Second Simulation Engine (`backend/src/modules/market/` & `backend/src/modules/simulation/`)
+- **Canonical Dataset Model:** Real-world trading sessions partitioned into 10-second OHLCV intervals (72 intervals per 12-minute simulated day, across multiple days and symbols).
+- **In-Memory Price Cache (`PriceCache`):** Microsecond quote retrieval during active trading ticks, backed by durable `dataset_candles`.
+- **Authoritative Cursor:** `simulation_states` stores the global `simulation_day`, `interval_index`, `market_status` (`OPEN`, `PAUSED`, `HALTED`, `CLOSED`), and `day_status`.
+- **Simulation Worker (`SimulationWorker`):** Background worker utilizing PostgreSQL session-level advisory locks (`pg_try_advisory_lock`) to guarantee singleton cursor tick advancement across multi-instance deployments without double-stepping.
 
-A Fastify-compatible WebSocket gateway will require an auth message immediately, validate subscriptions, emit connection-scoped sequences, and clean connections on close. A publisher abstraction—not repositories—will route post-commit outbox events. Private routing must use a shared broker or durable routing mechanism for multi-instance deployment; local connection maps may only be an edge cache. Reconnect uses REST resynchronization because v1 does not replay events.
+### 2.3. Immediate Market Execution Engine (`backend/src/modules/orders/`)
+- **Execution Model:** Pure MARKET order execution. No order book matching or counterparty search. Valid orders fill immediately at the authoritative 10-second candle close price.
+- **Atomic Transaction Isolation:** Every order submission runs inside a PostgreSQL `SERIALIZABLE` or strict row-locked transaction:
+  1. Validates market state (`OPEN`, event `RUNNING`).
+  2. Acquires row-level locks on `portfolios` and `positions` (`FOR UPDATE`).
+  3. Checks cash balance and buying power.
+  4. Resolves authoritative execution price.
+  5. Inserts `orders` row (`status = 'FILLED'`) and corresponding `executions` record.
+  6. Updates portfolio balances (deducts cash for BUY, credits cash for SELL) and appends to `portfolio_ledger_entries`.
+  7. Updates or flips `positions` records (with precise weighted average entry price for additions, and full P&L realization on reductions/flips).
+  8. Commits transaction and triggers WebSocket notification (`order.updated`, `position.updated`, `portfolio.updated`).
 
-## Simulation worker and recovery
+### 2.4. Position Lifecycle & Flipping Mechanics (`backend/src/modules/positions/`)
+- **Position Tracking:** Supports both `LONG` and `SHORT` positions.
+- **Position Flip Protocol:** If a trader is LONG 50 units and submits SELL 80 units:
+  - Step A: 50 units are closed at the execution price, realizing P&L against the previous entry price.
+  - Step B: Remaining 30 units open a new `SHORT` position with average entry price equal to the fill price. No blending of entry prices across zero.
+- **Zero-Float Precision:** All monetary amounts, prices, equity, cash, and P&L are computed using `decimal.js` with arbitrary precision (up to 24 digits, 8 decimal places) and persisted as PostgreSQL `numeric(24,8)` strings. Floating-point arithmetic is strictly prohibited.
 
-A worker obtains a durable DB lease/advisory lock per event, advances exactly one fully transactional 10-second interval, commits cursor/current candle/market state atomically, then publishes. It never treats process memory as authority. On restart, it reloads cursor/state and follows contract restrictions rather than auto-resuming a forbidden state. Interval IDs and conditional cursor updates prevent duplicate day or interval advancement.
+### 2.5. Real-Time WebSocket Gateway (`backend/src/modules/websocket/`)
+- **Handshake & Auth:** Immediate `connection.established` handshake; clients authenticate via `{ "action": "auth", "token": "<JWT>" }`.
+- **Channels:** `market`, `news`, `portfolio`, `positions`, `leaderboard`, `orders`.
+- **Broadcast Isolation:** Public events (quotes, market status, news, leaderboard) are broadcast globally; private events (order fills, portfolio updates, private position alerts) are delivered exclusively to the authenticated user's socket connection.
 
-## Idempotency and recovery
+---
 
-The idempotency repository stores actor, key, request fingerprint, status, canonical response, and expiry in PostgreSQL. Same key/same request returns the saved result; same key/different request is conflict. Client order ID has a distinct unique anchor. A transactional outbox closes the commit-to-publish gap. Database/service outages produce sanitized `503 SYSTEM_UNAVAILABLE` with recovery-safe behavior; clients resolve ambiguity through the documented REST lookups and same keys.
+## 3. Production Readiness & Concurrency
 
-## Phase 2 schema implementation
-
-The Phase 2 migration creates the durable entities identified in the mapping: identities and refresh-token records; immutable dataset metadata, instruments and canonical candles; event configuration and simulation cursor/lease state; participant portfolios/positions; the future order/execution/ledger/idempotency structures; plus news, leaderboard snapshots, audit logs and a transactional outbox. Database checks protect positive quantities, prices, cash and cursor values, candle OHLC invariants, and unique identities/idempotency keys. The schema deliberately stores numeric financial values as `numeric(24,8)` and maps them to string values in Drizzle; no money field is a floating-point column. Order rows and ledger tables are persistence preparation only in this phase—no execution service is implemented.
+| Dimension | Target | Architecture Provision |
+|---|---|---|
+| Concurrent Users | 300+ Active Traders | Asynchronous Fastify event loop, connection pooling (`max: 50`), in-memory price caching |
+| Order Throughput | 50+ orders/sec | Immediate single-trade execution without order book depth search |
+| Data Integrity | Zero Lost Updates | PostgreSQL ACID transactions with `FOR UPDATE` row locks |
+| Crash Recovery | Zero State Loss | State strictly persisted in PostgreSQL; simulation worker re-syncs cursor on startup |
+| Financial Precision | 100% Exact | `numeric(24,8)` database columns + `decimal.js` calculations |

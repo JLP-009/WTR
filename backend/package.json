@@ -19,6 +19,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:reset": "tsx scripts/db-reset.ts",
+    "db:reset-trades": "tsx scripts/reset-trades.ts",
     "db:seed": "tsx src/db/seed/index.ts",
     "seed:admin": "tsx src/db/seed/admin.ts",
     "seed:participant": "tsx src/db/seed/participant.ts",

@@ -141,17 +141,12 @@ export default function ChartPage() {
       }
     });
 
-    const unsubPort = wsClient.subscribe('portfolio', () => {
-      loadPositions();
-    });
-
     const unsubOrders = wsClient.subscribe('orders', () => {
       loadPositions();
     });
 
     return () => {
       unsubMarket();
-      unsubPort();
       unsubOrders();
     };
   }, [symbol, loadPositions]);

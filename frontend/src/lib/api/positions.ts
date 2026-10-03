@@ -29,8 +29,10 @@ export async function getPositions(): Promise<Position[]> {
       pnl: parseFloat(p.unrealized_pnl || '0'),
       pnlPct: parseFloat(p.unrealized_pnl_percent || '0'),
     }));
-  } catch {
-    return [];
+  } catch (err: any) {
+    // Only return empty for 404 (no positions) — re-throw real errors
+    if (err?.statusCode === 404) return [];
+    throw err;
   }
 }
 

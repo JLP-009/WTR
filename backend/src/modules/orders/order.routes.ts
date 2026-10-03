@@ -9,6 +9,10 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     const parsed = submitOrderSchema.parse(request.body);
     const idempotencyKey = request.headers['idempotency-key'] as string | undefined;
     const data = await orderService.submitOrder(request.user!.userId, parsed, idempotencyKey);
+    
+    // Broadcast order update to the specific user for instant UI feedback
+    app.wsGateway.sendToUser(request.user!.userId, 'orders', [data]);
+
     return reply.status(201).send({ data, request_id: request.requestId });
   });
 

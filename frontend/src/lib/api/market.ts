@@ -37,14 +37,9 @@ export async function getMarketState(symbol: string = 'NIFTY'): Promise<MarketSt
       change: parseFloat(quote.change || '0'),
       changePct: parseFloat(quote.change_percent || '0'),
     };
-  } catch {
-    return {
-      status: 'PAUSED',
-      symbol: cleanSymbol,
-      ltp: 0,
-      change: 0,
-      changePct: 0,
-    };
+  } catch (err) {
+    console.error(`[Market] Failed to fetch quote for ${cleanSymbol}:`, err);
+    throw err;
   }
 }
 
@@ -66,11 +61,8 @@ export async function getMarketData(symbol: string = 'NIFTY', timeframe: Timefra
       timeframe,
       candles: mappedCandles,
     };
-  } catch {
-    return {
-      symbol: cleanSymbol,
-      timeframe,
-      candles: [],
-    };
+  } catch (err) {
+    console.error(`[Market] Failed to fetch candles for ${cleanSymbol}:`, err);
+    throw err;
   }
 }

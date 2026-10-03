@@ -108,10 +108,10 @@ export default function LeaderboardPage({ onBack }: LeaderboardPageProps) {
       ) : data ? (
         <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-2xl px-4">
           {topEntries.map((entry) => (
-            <EntryRow key={entry.rank} entry={entry} isCurrentUser={false} />
+            <EntryRow key={`rank-${entry.participantId}-${entry.rank}`} entry={entry} isCurrentUser={false} />
           ))}
           {userEntry && (
-            <EntryRow entry={userEntry} isCurrentUser divider />
+            <EntryRow key={`user-${userEntry.participantId}`} entry={userEntry} isCurrentUser divider />
           )}
         </div>
       ) : null}

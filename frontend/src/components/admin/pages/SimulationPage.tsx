@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { Play, Pause, RotateCcw, SkipForward, ChevronRight, RefreshCw } from 'lucide-react';
 import StatusBadge from '../common/StatusBadge';
+import DaySessionTimer from '../common/DaySessionTimer';
 import ConfirmDialog from '../common/ConfirmDialog';
 import ErrorState from '../../common/ErrorState';
 import { SkeletonCard } from '../../common/LoadingState';
@@ -111,6 +112,18 @@ export default function SimulationPage() {
           {actionError}
         </div>
       )}
+
+      {/* Live Trading Day Session Timer & Control */}
+      <DaySessionTimer
+        simulationDay={s.simulation_day}
+        totalSimulationDays={totalDays}
+        intervalIndex={s.interval_index}
+        marketStatus={e.market_status}
+        dayStatus={e.day_status}
+        simulationTime={s.simulation_time}
+        onStartNextDay={() => runAction('next-day')}
+        actionLoading={actionLoading}
+      />
 
       {/* Status overview */}
       <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-2xl p-6">

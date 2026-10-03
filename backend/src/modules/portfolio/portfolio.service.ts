@@ -3,6 +3,7 @@ import { Decimal } from 'decimal.js';
 import type { Database } from '../../db/client.js';
 import * as schema from '../../db/schema/index.js';
 import { MarketService } from '../market/market.service.js';
+import { livePriceCache } from '../market/price-cache.js';
 
 export interface PortfolioSummary {
   cash: string;
@@ -103,27 +104,24 @@ export class PortfolioService {
 
     for (const { position, instrument } of positionRows) {
       if (position.quantity > 0 && position.side && position.averageEntryPrice) {
-        try {
-          const quote = await this.marketService.getLatestQuote(instrument.symbol);
-          const curPrice = new Decimal(quote.last_price);
-          const avgPrice = new Decimal(position.averageEntryPrice);
-          const qty = new Decimal(position.quantity);
+        // Read directly from the in-memory price cache to avoid N+1 DB queries
+        const cached = livePriceCache.getByInstrumentId(instrument.id);
+        const curPrice = cached ? cached.price : new Decimal(position.averageEntryPrice);
+        const avgPrice = new Decimal(position.averageEntryPrice);
+        const qty = new Decimal(position.quantity);
 
-          if (position.side === 'LONG') {
-            const invested = avgPrice.times(qty);
-            const mVal = curPrice.times(qty);
-            const unPnl = curPrice.minus(avgPrice).times(qty);
-            totalInvested = totalInvested.plus(invested);
-            totalMarketValue = totalMarketValue.plus(mVal);
-            totalUnrealizedPnl = totalUnrealizedPnl.plus(unPnl);
-          } else if (position.side === 'SHORT') {
-            const invested = avgPrice.times(qty);
-            const unPnl = avgPrice.minus(curPrice).times(qty);
-            totalInvested = totalInvested.plus(invested);
-            totalUnrealizedPnl = totalUnrealizedPnl.plus(unPnl);
-          }
-        } catch {
-          // If quote unavailable, fallback
+        if (position.side === 'LONG') {
+          const invested = avgPrice.times(qty);
+          const mVal = curPrice.times(qty);
+          const unPnl = curPrice.minus(avgPrice).times(qty);
+          totalInvested = totalInvested.plus(invested);
+          totalMarketValue = totalMarketValue.plus(mVal);
+          totalUnrealizedPnl = totalUnrealizedPnl.plus(unPnl);
+        } else if (position.side === 'SHORT') {
+          const invested = avgPrice.times(qty);
+          const unPnl = avgPrice.minus(curPrice).times(qty);
+          totalInvested = totalInvested.plus(invested);
+          totalUnrealizedPnl = totalUnrealizedPnl.plus(unPnl);
         }
       }
     }
@@ -173,13 +171,8 @@ export class PortfolioService {
 
     for (const { position, instrument } of rows) {
       if (position.quantity > 0 && position.side && position.averageEntryPrice) {
-        let curPriceStr = position.averageEntryPrice;
-        try {
-          const quote = await this.marketService.getLatestQuote(instrument.symbol);
-          curPriceStr = quote.last_price;
-        } catch {
-          // Ignore
-        }
+        const cached = livePriceCache.getByInstrumentId(instrument.id);
+        const curPriceStr = cached ? cached.price.toFixed(2) : position.averageEntryPrice;
 
         const curPrice = new Decimal(curPriceStr);
         const avgPrice = new Decimal(position.averageEntryPrice);

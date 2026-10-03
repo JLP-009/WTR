@@ -35,6 +35,7 @@ export const websocketPlugin = fp<WebSocketPluginOptions>(async (app, options) =
 
   app.addHook('onClose', (_instance, done) => {
     simWorker.stop();
+    wsGateway.stop();
     done();
   });
 

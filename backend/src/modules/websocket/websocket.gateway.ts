@@ -9,12 +9,38 @@ export interface ClientConnection {
   authenticated: boolean;
   subscriptions: Set<string>;
   symbols: Set<string>;
+  isAlive: boolean;
 }
 
 export class WebSocketGateway {
   private readonly clients = new Set<ClientConnection>();
+  private heartbeatTimer?: NodeJS.Timeout;
 
-  public constructor(private readonly app: FastifyInstance, private readonly env: Environment) {}
+  public constructor(private readonly app: FastifyInstance, private readonly env: Environment) {
+    this.startHeartbeat();
+  }
+
+  public stop() {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    for (const client of this.clients) {
+      client.socket.terminate();
+    }
+    this.clients.clear();
+  }
+
+  private startHeartbeat() {
+    this.heartbeatTimer = setInterval(() => {
+      for (const client of this.clients) {
+        if (client.isAlive === false) {
+          client.socket.terminate();
+          this.clients.delete(client);
+        } else {
+          client.isAlive = false;
+          client.socket.ping();
+        }
+      }
+    }, 30000);
+  }
 
   public handleConnection(socket: WebSocket) {
     const client: ClientConnection = {
@@ -22,6 +48,7 @@ export class WebSocketGateway {
       authenticated: false,
       subscriptions: new Set(['market', 'news', 'portfolio', 'positions', 'leaderboard', 'orders']),
       symbols: new Set(),
+      isAlive: true,
     };
 
     this.clients.add(client);
@@ -42,6 +69,10 @@ export class WebSocketGateway {
           error: { code: 'INVALID_MESSAGE', message: 'Failed to parse JSON message.' },
         });
       }
+    });
+
+    socket.on('pong', () => {
+      client.isAlive = true;
     });
 
     socket.on('close', () => {

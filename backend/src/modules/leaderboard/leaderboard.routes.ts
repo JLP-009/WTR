@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { eq, desc } from 'drizzle-orm';
 import { Decimal } from 'decimal.js';
 import * as schema from '../../db/schema/index.js';
-import { MarketService } from '../market/market.service.js';
+import { livePriceCache } from '../market/price-cache.js';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -14,13 +14,15 @@ export interface LeaderboardEntry {
   total_pnl: string;
   total_pnl_percent: string;
   trades_count: number;
-  win_rate: string;
 }
 
 export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
-  const marketService = new MarketService(app.db);
-
-  const computeLeaderboard = async (): Promise<LeaderboardEntry[]> => {
+  /**
+   * Serve leaderboard from the latest snapshot (computed at day close).
+   * Falls back to a lightweight live computation if no snapshot exists yet.
+   */
+  const getLeaderboardData = async (): Promise<LeaderboardEntry[]> => {
+    // 1. Try to serve from snapshot first (computed at day close — O(1) read)
     const [activeEvent] = await app.db
       .select()
       .from(schema.events)
@@ -29,97 +31,110 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
 
     if (!activeEvent) return [];
 
-    const participantUsers = await app.db
+    const [latestSnapshot] = await app.db
       .select()
+      .from(schema.leaderboardSnapshots)
+      .where(eq(schema.leaderboardSnapshots.eventId, activeEvent.id))
+      .orderBy(desc(schema.leaderboardSnapshots.version))
+      .limit(1);
+
+    if (latestSnapshot?.snapshot) {
+      return latestSnapshot.snapshot as LeaderboardEntry[];
+    }
+
+    // 2. No snapshot yet (first day, before first close) — compute lightweight live version
+    // Uses batch queries (2 queries total) instead of per-user loops
+    const users = await app.db
+      .select({
+        userId: schema.users.id,
+        publicId: schema.users.publicId,
+        participantId: schema.users.participantId,
+        displayName: schema.users.displayName,
+        startingCapital: schema.portfolios.startingCapital,
+        availableCash: schema.portfolios.availableCash,
+        reservedCash: schema.portfolios.reservedCash,
+        realizedPnl: schema.portfolios.realizedPnl,
+      })
       .from(schema.users)
+      .innerJoin(schema.portfolios, eq(schema.users.id, schema.portfolios.userId))
       .where(eq(schema.users.role, 'PARTICIPANT'));
 
-    const entries: LeaderboardEntry[] = [];
+    const allPositions = await app.db
+      .select({
+        userId: schema.positions.userId,
+        symbol: schema.instruments.symbol,
+        side: schema.positions.side,
+        quantity: schema.positions.quantity,
+        averageEntryPrice: schema.positions.averageEntryPrice,
+      })
+      .from(schema.positions)
+      .innerJoin(schema.instruments, eq(schema.positions.instrumentId, schema.instruments.id))
+      .where(eq(schema.positions.eventId, activeEvent.id));
 
-    for (const user of participantUsers) {
-      const [portfolio] = await app.db
-        .select()
-        .from(schema.portfolios)
-        .where(eq(schema.portfolios.userId, user.id))
-        .limit(1);
+    // Group positions by user
+    const positionsByUser = new Map<string, typeof allPositions>();
+    for (const pos of allPositions) {
+      const existing = positionsByUser.get(pos.userId) || [];
+      existing.push(pos);
+      positionsByUser.set(pos.userId, existing);
+    }
 
-      const startingCapital = new Decimal(portfolio?.startingCapital || '1000000');
-      const availableCash = new Decimal(portfolio?.availableCash || '1000000');
-      const reservedCash = new Decimal(portfolio?.reservedCash || '0');
-      const realizedPnl = new Decimal(portfolio?.realizedPnl || '0');
+    const entries: LeaderboardEntry[] = users.map((user) => {
+      const startCap = new Decimal(user.startingCapital || '1000000');
+      const availCash = new Decimal(user.availableCash || '1000000');
+      const reserved = new Decimal(user.reservedCash || '0');
+      const realizedPnl = new Decimal(user.realizedPnl || '0');
 
-      const positionRows = await app.db
-        .select({
-          position: schema.positions,
-          instrument: schema.instruments,
-        })
-        .from(schema.positions)
-        .innerJoin(schema.instruments, eq(schema.positions.instrumentId, schema.instruments.id))
-        .where(eq(schema.positions.userId, user.id));
+      let unrealizedPnl = new Decimal(0);
+      let marketValue = new Decimal(0);
+      const userPositions = positionsByUser.get(user.userId) || [];
 
-      let totalMarketValue = new Decimal(0);
-      let totalUnrealizedPnl = new Decimal(0);
+      for (const pos of userPositions) {
+        if (pos.quantity > 0 && pos.side && pos.averageEntryPrice) {
+          const cached = livePriceCache.getBySymbol(pos.symbol);
+          const curPrice = cached ? cached.price : new Decimal(pos.averageEntryPrice);
+          const avgPrice = new Decimal(pos.averageEntryPrice);
+          const qty = new Decimal(pos.quantity);
 
-      for (const { position, instrument } of positionRows) {
-        if (position.quantity > 0 && position.side && position.averageEntryPrice) {
-          try {
-            const quote = await marketService.getLatestQuote(instrument.symbol);
-            const curPrice = new Decimal(quote.last_price);
-            const avgPrice = new Decimal(position.averageEntryPrice);
-            const qty = new Decimal(position.quantity);
-
-            if (position.side === 'LONG') {
-              totalMarketValue = totalMarketValue.plus(curPrice.times(qty));
-              totalUnrealizedPnl = totalUnrealizedPnl.plus(curPrice.minus(avgPrice).times(qty));
-            } else if (position.side === 'SHORT') {
-              totalMarketValue = totalMarketValue.plus(avgPrice.times(qty));
-              totalUnrealizedPnl = totalUnrealizedPnl.plus(avgPrice.minus(curPrice).times(qty));
-            }
-          } catch {
-            // Ignore
+          if (pos.side === 'LONG') {
+            marketValue = marketValue.plus(curPrice.times(qty));
+            unrealizedPnl = unrealizedPnl.plus(curPrice.minus(avgPrice).times(qty));
+          } else if (pos.side === 'SHORT') {
+            marketValue = marketValue.plus(avgPrice.times(qty));
+            unrealizedPnl = unrealizedPnl.plus(avgPrice.minus(curPrice).times(qty));
           }
         }
       }
 
-      const equity = availableCash.plus(reservedCash).plus(totalMarketValue);
-      const totalPnl = realizedPnl.plus(totalUnrealizedPnl);
-      const totalPnlPercent = startingCapital.isZero() ? new Decimal(0) : totalPnl.dividedBy(startingCapital).times(100);
+      const equity = availCash.plus(reserved).plus(marketValue);
+      const totalPnl = realizedPnl.plus(unrealizedPnl);
+      const totalPnlPct = startCap.isZero() ? new Decimal(0) : totalPnl.dividedBy(startCap).times(100);
 
-      const userOrders = await app.db
-        .select()
-        .from(schema.orders)
-        .where(eq(schema.orders.userId, user.id));
-
-      entries.push({
+      return {
         rank: 0,
         user_id: user.publicId,
         participant_id: user.participantId,
         display_name: user.displayName,
-        starting_capital: startingCapital.toFixed(2),
+        starting_capital: startCap.toFixed(2),
         equity: equity.toFixed(2),
         total_pnl: totalPnl.toFixed(2),
-        total_pnl_percent: totalPnlPercent.toFixed(2),
-        trades_count: userOrders.length,
-        win_rate: totalPnl.greaterThan(0) ? '66.7%' : '0.0%',
-      });
-    }
+        total_pnl_percent: totalPnlPct.toFixed(2),
+        trades_count: 0,
+      };
+    });
 
-    // Sort by equity descending
+    // Sort by equity descending and assign ranks
     entries.sort((a, b) => new Decimal(b.equity).minus(new Decimal(a.equity)).toNumber());
-
-    return entries.map((entry, idx) => ({
-      ...entry,
-      rank: idx + 1,
-    }));
+    return entries.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
   };
 
   app.get('/', { preHandler: [app.optionalAuthenticate] }, async (request) => {
-    const data = await computeLeaderboard();
+    const data = await getLeaderboardData();
     return { data, request_id: request.requestId };
   });
 
   app.get('/me', { preHandler: [app.authenticate] }, async (request) => {
-    const list = await computeLeaderboard();
+    const list = await getLeaderboardData();
     const myEntry = list.find((e) => e.participant_id === request.user!.participantId);
     return {
       data: myEntry || {
@@ -132,7 +147,6 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
         total_pnl: '0.00',
         total_pnl_percent: '0.00',
         trades_count: 0,
-        win_rate: '0.0%',
       },
       request_id: request.requestId,
     };

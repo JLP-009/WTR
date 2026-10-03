@@ -11,8 +11,8 @@ class WebSocketClient {
 
   constructor() {
     const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const defaultHost = window.location.hostname || 'localhost';
-    this.url = `${wsProto}//${defaultHost}:3000/api/v1/ws`;
+    const host = window.location.host;
+    this.url = `${wsProto}//${host}/api/v1/ws`;
   }
 
   public connect() {
