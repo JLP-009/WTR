@@ -51,15 +51,36 @@ export interface CandleData {
 }
 
 export class MarketService {
+  private static readonly instrumentsCache = new Map<string, typeof schema.instruments.$inferSelect>();
+  private static readonly candlesCache = new Map<string, { data: CandleData[]; expiresAt: number }>();
+  private static cachedInstrumentsList: { list: InstrumentData[]; expiresAt: number } | null = null;
+  private static cachedEventState: {
+    event: typeof schema.events.$inferSelect;
+    simState: typeof schema.simulationStates.$inferSelect;
+    expiresAt: number;
+  } | null = null;
+
   public constructor(private readonly db: Database) {}
 
   public async getMarketStatus(): Promise<MarketStatusData> {
     const now = new Date();
-    const [activeEvent] = await this.db
-      .select()
-      .from(schema.events)
-      .orderBy(desc(schema.events.createdAt))
-      .limit(1);
+    let activeEvent: typeof schema.events.$inferSelect | undefined;
+    let simState: typeof schema.simulationStates.$inferSelect | undefined;
+
+    if (MarketService.cachedEventState && Date.now() < MarketService.cachedEventState.expiresAt) {
+      activeEvent = MarketService.cachedEventState.event;
+      simState = MarketService.cachedEventState.simState;
+    } else {
+      const [[eventRow], [simRow]] = await Promise.all([
+        this.db.select().from(schema.events).orderBy(desc(schema.events.createdAt)).limit(1),
+        this.db.select().from(schema.simulationStates).orderBy(desc(schema.simulationStates.updatedAt)).limit(1),
+      ]);
+      activeEvent = eventRow;
+      simState = simRow;
+      if (activeEvent && simState) {
+        MarketService.cachedEventState = { event: activeEvent, simState, expiresAt: Date.now() + 1500 };
+      }
+    }
 
     if (!activeEvent) {
       return {
@@ -74,11 +95,14 @@ export class MarketService {
       };
     }
 
-    const [simState] = await this.db
-      .select()
-      .from(schema.simulationStates)
-      .where(eq(schema.simulationStates.eventId, activeEvent.id))
-      .limit(1);
+    if (!simState && activeEvent) {
+      const [row] = await this.db
+        .select()
+        .from(schema.simulationStates)
+        .where(eq(schema.simulationStates.eventId, activeEvent.id))
+        .limit(1);
+      simState = row;
+    }
 
     const simulationDay = simState?.simulationDay ?? 1;
     const intervalIndex = simState?.intervalIndex ?? 0;
@@ -103,12 +127,20 @@ export class MarketService {
   }
 
   public async getInstruments(): Promise<InstrumentData[]> {
+    if (MarketService.cachedInstrumentsList && Date.now() < MarketService.cachedInstrumentsList.expiresAt) {
+      return MarketService.cachedInstrumentsList.list;
+    }
+
     const rows = await this.db
       .select()
       .from(schema.instruments)
       .orderBy(asc(schema.instruments.symbol));
 
-    return rows.map((inst) => ({
+    for (const inst of rows) {
+      MarketService.instrumentsCache.set(inst.symbol.toUpperCase(), inst);
+    }
+
+    const list = rows.map((inst) => ({
       symbol: inst.symbol,
       name: inst.name,
       instrument_type: inst.instrumentType,
@@ -117,14 +149,25 @@ export class MarketService {
       tick_size: inst.tickSize,
       lot_size: inst.lotSize,
     }));
+
+    MarketService.cachedInstrumentsList = { list, expiresAt: Date.now() + 60000 };
+    return list;
   }
 
   public async getInstrument(symbol: string): Promise<InstrumentData> {
-    const [inst] = await this.db
-      .select()
-      .from(schema.instruments)
-      .where(eq(schema.instruments.symbol, symbol.toUpperCase()))
-      .limit(1);
+    const clean = symbol.toUpperCase();
+    let inst = MarketService.instrumentsCache.get(clean);
+    if (!inst) {
+      const [row] = await this.db
+        .select()
+        .from(schema.instruments)
+        .where(eq(schema.instruments.symbol, clean))
+        .limit(1);
+      if (row) {
+        MarketService.instrumentsCache.set(clean, row);
+        inst = row;
+      }
+    }
 
     if (!inst) {
       throw new AppError('NOT_FOUND', 404, `Instrument '${symbol}' not found.`);
@@ -142,17 +185,8 @@ export class MarketService {
   }
 
   public async getLatestQuote(symbol: string): Promise<QuoteData> {
-    const [inst] = await this.db
-      .select()
-      .from(schema.instruments)
-      .where(eq(schema.instruments.symbol, symbol.toUpperCase()))
-      .limit(1);
-
-    if (!inst) {
-      throw new AppError('NOT_FOUND', 404, `Instrument '${symbol}' not found.`);
-    }
-
-    const cached = livePriceCache.getBySymbol(symbol);
+    const clean = symbol.toUpperCase();
+    const cached = livePriceCache.getBySymbol(clean);
     if (cached) {
       const lastPrice = cached.price;
       const openPrice = cached.open;
@@ -160,7 +194,7 @@ export class MarketService {
       const change = lastPrice.minus(prevClose);
       const changePercent = prevClose.isZero() ? new Decimal(0) : change.dividedBy(prevClose).times(100);
       return {
-        symbol: inst.symbol,
+        symbol: clean,
         last_price: lastPrice.toFixed(2),
         open_price: openPrice.toFixed(2),
         high_price: cached.high.toFixed(2),
@@ -171,6 +205,23 @@ export class MarketService {
         volume: 0,
         timestamp: cached.timestamp.toISOString(),
       };
+    }
+
+    let inst = MarketService.instrumentsCache.get(clean);
+    if (!inst) {
+      const [row] = await this.db
+        .select()
+        .from(schema.instruments)
+        .where(eq(schema.instruments.symbol, clean))
+        .limit(1);
+      if (row) {
+        MarketService.instrumentsCache.set(clean, row);
+        inst = row;
+      }
+    }
+
+    if (!inst) {
+      throw new AppError('NOT_FOUND', 404, `Instrument '${symbol}' not found.`);
     }
 
     const [activeEvent] = await this.db
@@ -273,29 +324,47 @@ export class MarketService {
   }
 
   public async getCandles(symbol: string, limit: number = 200): Promise<CandleData[]> {
-    const [inst] = await this.db
-      .select()
-      .from(schema.instruments)
-      .where(eq(schema.instruments.symbol, symbol.toUpperCase()))
-      .limit(1);
+    const clean = symbol.toUpperCase();
+    const cacheKey = `${clean}_${limit}`;
+    const cachedCandles = MarketService.candlesCache.get(cacheKey);
+    if (cachedCandles && Date.now() < cachedCandles.expiresAt) {
+      return cachedCandles.data;
+    }
+
+    let inst = MarketService.instrumentsCache.get(clean);
+    if (!inst) {
+      const [row] = await this.db
+        .select()
+        .from(schema.instruments)
+        .where(eq(schema.instruments.symbol, clean))
+        .limit(1);
+      if (row) {
+        MarketService.instrumentsCache.set(clean, row);
+        inst = row;
+      }
+    }
 
     if (!inst) {
       throw new AppError('NOT_FOUND', 404, `Instrument '${symbol}' not found.`);
     }
 
-    const [activeEvent] = await this.db
-      .select()
-      .from(schema.events)
-      .orderBy(desc(schema.events.createdAt))
-      .limit(1);
+    let activeEvent: typeof schema.events.$inferSelect | undefined;
+    let simState: typeof schema.simulationStates.$inferSelect | undefined;
 
-    const [simState] = activeEvent
-      ? await this.db
-          .select()
-          .from(schema.simulationStates)
-          .where(eq(schema.simulationStates.eventId, activeEvent.id))
-          .limit(1)
-      : [undefined];
+    if (MarketService.cachedEventState && Date.now() < MarketService.cachedEventState.expiresAt) {
+      activeEvent = MarketService.cachedEventState.event;
+      simState = MarketService.cachedEventState.simState;
+    } else {
+      const [[eventRow], [simRow]] = await Promise.all([
+        this.db.select().from(schema.events).orderBy(desc(schema.events.createdAt)).limit(1),
+        this.db.select().from(schema.simulationStates).orderBy(desc(schema.simulationStates.updatedAt)).limit(1),
+      ]);
+      activeEvent = eventRow;
+      simState = simRow;
+      if (activeEvent && simState) {
+        MarketService.cachedEventState = { event: activeEvent, simState, expiresAt: Date.now() + 1500 };
+      }
+    }
 
     const currentDay = simState?.simulationDay || 1;
     const currentInterval = simState?.intervalIndex ?? 0;
@@ -332,7 +401,7 @@ export class MarketService {
         .limit(72);
     }
 
-    return rows.map((r) => ({
+    const result = rows.map((r) => ({
       timestamp: r.timestamp.toISOString(),
       open: r.open,
       high: r.high,
@@ -342,5 +411,8 @@ export class MarketService {
       interval_index: r.intervalIndex,
       trading_day: r.tradingDay,
     }));
+
+    MarketService.candlesCache.set(cacheKey, { data: result, expiresAt: Date.now() + 3000 });
+    return result;
   }
 }
