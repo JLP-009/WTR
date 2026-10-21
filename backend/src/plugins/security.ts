@@ -18,7 +18,7 @@ export const securityPlugin = (env: Environment) => fp(async (app) => {
     timeWindow: env.RATE_LIMIT_WINDOW || '1 minute',
     keyGenerator: (req) => {
       const user = (req as any).user;
-      return user?.userId || req.ip;
+      return user?.userId || (req.headers['authorization'] as string) || req.ip;
     },
   });
 }, { name: 'security' });

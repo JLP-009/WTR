@@ -11,7 +11,7 @@ const environmentSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   WS_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
   SIMULATION_TICK_INTERVAL_MS: z.coerce.number().int().positive().default(10000),
-  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5000),
   RATE_LIMIT_WINDOW: z.string().min(1).default('1 minute'),
 });
 
