@@ -219,7 +219,8 @@ export default function ChartPage() {
       if (res.status === 'ACCEPTED') {
         setOrderSuccess(res.message);
         setTimeout(() => setOrderSuccess(''), 3000);
-        await loadPositions();
+        // Refresh positions in background without blocking UI
+        loadPositions();
       } else {
         setOrderError(res.message);
       }
@@ -237,9 +238,16 @@ export default function ChartPage() {
 
   const confirmClosePosition = async () => {
     if (!currentPos || currentPos.quantity <= 0) return;
+    const prevPos = currentPos;
     setShowCloseConfirm(false);
-    const side = currentPos.side === 'LONG' ? 'SELL' : 'BUY';
-    await executeOrder(side, currentPos.quantity);
+    // Optimistically clear position display immediately
+    setCurrentPos(null);
+    const side = prevPos.side === 'LONG' ? 'SELL' : 'BUY';
+    try {
+      await executeOrder(side, prevPos.quantity);
+    } catch {
+      setCurrentPos(prevPos);
+    }
   };
 
   const confirmFlip = () => {

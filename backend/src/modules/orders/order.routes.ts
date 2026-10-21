@@ -15,19 +15,22 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
     // Broadcast order update to the specific user for instant UI feedback
     app.wsGateway.sendToUser(request.user!.userId, 'orders', [data]);
 
-    // Immediately push refreshed portfolio & positions to the user so UI updates with 0 latency
-    try {
-      const [portfolioSummary, positions] = await Promise.all([
-        portfolioService.getPortfolioSummary(request.user!.userId),
-        portfolioService.getPositions(request.user!.userId),
-      ]);
-      app.wsGateway.sendToUser(request.user!.userId, 'portfolio', portfolioSummary);
-      app.wsGateway.sendToUser(request.user!.userId, 'positions', positions);
-    } catch (err) {
-      app.log.error(err, '[Orders] Failed to push post-order portfolio/positions update');
-    }
+    // Send HTTP 201 response immediately without waiting for background metrics
+    reply.status(201).send({ data, request_id: request.requestId });
 
-    return reply.status(201).send({ data, request_id: request.requestId });
+    // Asynchronously push refreshed portfolio & positions to the user so UI updates without holding HTTP connection
+    queueMicrotask(async () => {
+      try {
+        const [portfolioSummary, positions] = await Promise.all([
+          portfolioService.getPortfolioSummary(request.user!.userId),
+          portfolioService.getPositions(request.user!.userId),
+        ]);
+        app.wsGateway.sendToUser(request.user!.userId, 'portfolio', portfolioSummary);
+        app.wsGateway.sendToUser(request.user!.userId, 'positions', positions);
+      } catch (err) {
+        app.log.error(err, '[Orders] Failed to push post-order portfolio/positions update');
+      }
+    });
   });
 
   app.get('/', { preHandler: [app.authenticate] }, async (request) => {

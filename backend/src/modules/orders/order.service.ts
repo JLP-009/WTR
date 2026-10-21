@@ -8,6 +8,14 @@ import type { SubmitOrderRequest, OrderResponse } from './order.types.js';
 import { livePriceCache } from '../market/price-cache.js';
 
 export class OrderService {
+  private static readonly recentIdempotencyKeys = new Map<string, OrderResponse>();
+  private static readonly instrumentsBySymbol = new Map<string, typeof schema.instruments.$inferSelect>();
+  private static cachedEventState: {
+    event: typeof schema.events.$inferSelect;
+    simState: typeof schema.simulationStates.$inferSelect;
+    expiresAt: number;
+  } | null = null;
+
   public constructor(private readonly db: Database) {}
 
   public async submitOrder(
@@ -15,8 +23,12 @@ export class OrderService {
     req: SubmitOrderRequest,
     idempotencyKey?: string
   ): Promise<OrderResponse> {
-    // 1. Idempotency Check
+    // 1. Idempotency Check (Fast in-memory LRU first)
     const effectiveKey = idempotencyKey || req.client_order_id;
+    if (effectiveKey && OrderService.recentIdempotencyKeys.has(effectiveKey)) {
+      return OrderService.recentIdempotencyKeys.get(effectiveKey)!;
+    }
+
     const [existingRecord] = await this.db
       .select()
       .from(schema.idempotencyRecords)
@@ -29,38 +41,58 @@ export class OrderService {
       .limit(1);
 
     if (existingRecord) {
-      return existingRecord.responseBody as OrderResponse;
+      const resp = existingRecord.responseBody as OrderResponse;
+      OrderService.recentIdempotencyKeys.set(effectiveKey, resp);
+      return resp;
     }
 
-    // 2. Instrument Verification
-    const [instrument] = await this.db
-      .select()
-      .from(schema.instruments)
-      .where(eq(schema.instruments.symbol, req.symbol.toUpperCase()))
-      .limit(1);
+    // 2. Instrument Verification (Fast in-memory cache)
+    const cleanSymbol = req.symbol.toUpperCase();
+    let instrument = OrderService.instrumentsBySymbol.get(cleanSymbol);
+    if (!instrument) {
+      const [dbInst] = await this.db
+        .select()
+        .from(schema.instruments)
+        .where(eq(schema.instruments.symbol, cleanSymbol))
+        .limit(1);
+      if (dbInst) {
+        OrderService.instrumentsBySymbol.set(cleanSymbol, dbInst);
+        instrument = dbInst;
+      }
+    }
 
     if (!instrument || instrument.status !== 'ACTIVE') {
       throw new AppError('INVALID_ORDER', 400, `Instrument '${req.symbol}' is not active or tradeable.`);
     }
 
-    // 3. Active Event & Simulation State Check
-    const [activeEvent] = await this.db
-      .select()
-      .from(schema.events)
-      .orderBy(desc(schema.events.createdAt))
-      .limit(1);
+    // 3. Active Event & Simulation State Check (Cached for 1.5 seconds)
+    let activeEvent: typeof schema.events.$inferSelect | undefined;
+    let simState: typeof schema.simulationStates.$inferSelect | undefined;
+
+    if (OrderService.cachedEventState && Date.now() < OrderService.cachedEventState.expiresAt) {
+      activeEvent = OrderService.cachedEventState.event;
+      simState = OrderService.cachedEventState.simState;
+    } else {
+      const [[eventRow], [simRow]] = await Promise.all([
+        this.db.select().from(schema.events).orderBy(desc(schema.events.createdAt)).limit(1),
+        this.db.select().from(schema.simulationStates).orderBy(desc(schema.simulationStates.updatedAt)).limit(1),
+      ]);
+      activeEvent = eventRow;
+      simState = simRow;
+      if (activeEvent && simState) {
+        OrderService.cachedEventState = {
+          event: activeEvent,
+          simState,
+          expiresAt: Date.now() + 1500,
+        };
+      }
+    }
 
     if (!activeEvent || activeEvent.status !== 'RUNNING') {
       throw new AppError('SYSTEM_UNAVAILABLE', 503, `Trading event is ${activeEvent?.status || 'UNAVAILABLE'}. Orders cannot be placed.`, {
         event_status: activeEvent?.status || 'NOT_FOUND',
       });
     }
-
-    const [simState] = await this.db
-      .select()
-      .from(schema.simulationStates)
-      .where(eq(schema.simulationStates.eventId, activeEvent.id))
-      .limit(1);
 
     if (!simState || simState.marketStatus !== 'OPEN') {
       throw new AppError('MARKET_NOT_OPEN', 400, `Market is currently ${simState?.marketStatus || 'CLOSED'}. Order execution rejected.`, {
@@ -106,18 +138,35 @@ export class OrderService {
 
     // 5. Execute Order in Atomic Transaction
     const result = await this.db.transaction(async (tx) => {
-      // Fetch or Create Portfolio with Row-Level Lock
-      let [portfolio] = await tx
-        .select()
-        .from(schema.portfolios)
-        .where(
-          and(
-            eq(schema.portfolios.eventId, activeEvent.id),
-            eq(schema.portfolios.userId, userId)
+      // Fetch or Create Portfolio and Position in parallel with Row-Level Locks
+      const [[portfolioRow], [positionRow]] = await Promise.all([
+        tx
+          .select()
+          .from(schema.portfolios)
+          .where(
+            and(
+              eq(schema.portfolios.eventId, activeEvent.id),
+              eq(schema.portfolios.userId, userId)
+            )
           )
-        )
-        .for('update')
-        .limit(1);
+          .for('update')
+          .limit(1),
+        tx
+          .select()
+          .from(schema.positions)
+          .where(
+            and(
+              eq(schema.positions.eventId, activeEvent.id),
+              eq(schema.positions.userId, userId),
+              eq(schema.positions.instrumentId, instrument.id)
+            )
+          )
+          .for('update')
+          .limit(1),
+      ]);
+
+      let portfolio = portfolioRow;
+      let position = positionRow;
 
       if (!portfolio) {
         const defaultCapital = '1000000.00000000';
@@ -134,20 +183,6 @@ export class OrderService {
           })
           .returning();
       }
-
-      // Fetch Position for Instrument with Row-Level Lock
-      let [position] = await tx
-        .select()
-        .from(schema.positions)
-        .where(
-          and(
-            eq(schema.positions.eventId, activeEvent.id),
-            eq(schema.positions.userId, userId),
-            eq(schema.positions.instrumentId, instrument.id)
-          )
-        )
-        .for('update')
-        .limit(1);
 
       // Resolve Quantity
       let targetQuantity = req.quantity || 0;
@@ -312,67 +347,9 @@ export class OrderService {
         })
         .returning();
 
-      // Create Execution
+      // Create Execution ID & Order Response
       const executionPublicId = `exe_${randomUUID()}`;
-      const [execution] = await tx
-        .insert(schema.executions)
-        .values({
-          publicId: executionPublicId,
-          orderId: order.id,
-          quantity: targetQuantity,
-          price: executionPrice.toFixed(8),
-        })
-        .returning();
-
-      // Update Portfolio
-      await tx
-        .update(schema.portfolios)
-        .set({
-          availableCash: availableCash.toFixed(8),
-          realizedPnl: realizedPnl.toFixed(8),
-          dailyPnl: realizedPnl.toFixed(8),
-        })
-        .where(eq(schema.portfolios.id, portfolio.id));
-
-      // Record Ledger Entry
-      await tx.insert(schema.portfolioLedgerEntries).values({
-        portfolioId: portfolio.id,
-        orderId: order.id,
-        reason: 'ORDER_EXECUTION',
-        amount: executionPrice.times(targetQuantity).toFixed(8),
-        balanceAfter: availableCash.toFixed(8),
-        metadata: {
-          symbol: instrument.symbol,
-          side: req.side,
-          quantity: targetQuantity,
-          price: executionPrice.toFixed(8),
-        },
-      });
-
-      // Update Position
-      if (position) {
-        await tx
-          .update(schema.positions)
-          .set({
-            side: newPosSide,
-            quantity: newPosQty,
-            averageEntryPrice: newAvgPrice ? newAvgPrice.toFixed(8) : null,
-            realizedPnl: positionRealizedPnl.toFixed(8),
-            openedAt: newPosQty > 0 ? (position.openedAt || new Date()) : null,
-          })
-          .where(eq(schema.positions.id, position.id));
-      } else {
-        await tx.insert(schema.positions).values({
-          eventId: activeEvent.id,
-          userId,
-          instrumentId: instrument.id,
-          side: newPosSide,
-          quantity: newPosQty,
-          averageEntryPrice: newAvgPrice ? newAvgPrice.toFixed(8) : null,
-          realizedPnl: positionRealizedPnl.toFixed(8),
-          openedAt: newPosQty > 0 ? new Date() : null,
-        });
-      }
+      const executionTimestamp = new Date();
 
       const orderResponse: OrderResponse = {
         order_id: order.publicId,
@@ -387,26 +364,78 @@ export class OrderService {
         average_price: new Decimal(order.averagePrice!).toFixed(2),
         executions: [
           {
-            execution_id: execution.publicId,
-            quantity: execution.quantity,
-            price: new Decimal(execution.price).toFixed(2),
-            executed_at: execution.executedAt.toISOString(),
+            execution_id: executionPublicId,
+            quantity: targetQuantity,
+            price: new Decimal(executionPrice).toFixed(2),
+            executed_at: executionTimestamp.toISOString(),
           },
         ],
         created_at: order.createdAt.toISOString(),
         updated_at: order.updatedAt.toISOString(),
       };
 
-      // Save Idempotency Record
-      await tx.insert(schema.idempotencyRecords).values({
-        userId,
-        key: effectiveKey,
-        requestFingerprint: JSON.stringify(req),
-        responseStatus: 201,
-        responseBody: orderResponse,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-      });
+      // Execute all dependent database writes simultaneously in 1 network batch
+      await Promise.all([
+        tx.insert(schema.executions).values({
+          publicId: executionPublicId,
+          orderId: order.id,
+          quantity: targetQuantity,
+          price: executionPrice.toFixed(8),
+          executedAt: executionTimestamp,
+        }),
+        tx
+          .update(schema.portfolios)
+          .set({
+            availableCash: availableCash.toFixed(8),
+            realizedPnl: realizedPnl.toFixed(8),
+            dailyPnl: realizedPnl.toFixed(8),
+          })
+          .where(eq(schema.portfolios.id, portfolio.id)),
+        tx.insert(schema.portfolioLedgerEntries).values({
+          portfolioId: portfolio.id,
+          orderId: order.id,
+          reason: 'ORDER_EXECUTION',
+          amount: executionPrice.times(targetQuantity).toFixed(8),
+          balanceAfter: availableCash.toFixed(8),
+          metadata: {
+            symbol: instrument.symbol,
+            side: req.side,
+            quantity: targetQuantity,
+            price: executionPrice.toFixed(8),
+          },
+        }),
+        position
+          ? tx
+              .update(schema.positions)
+              .set({
+                side: newPosSide,
+                quantity: newPosQty,
+                averageEntryPrice: newAvgPrice ? newAvgPrice.toFixed(8) : null,
+                realizedPnl: positionRealizedPnl.toFixed(8),
+                openedAt: newPosQty > 0 ? (position.openedAt || new Date()) : null,
+              })
+              .where(eq(schema.positions.id, position.id))
+          : tx.insert(schema.positions).values({
+              eventId: activeEvent.id,
+              userId,
+              instrumentId: instrument.id,
+              side: newPosSide,
+              quantity: newPosQty,
+              averageEntryPrice: newAvgPrice ? newAvgPrice.toFixed(8) : null,
+              realizedPnl: positionRealizedPnl.toFixed(8),
+              openedAt: newPosQty > 0 ? new Date() : null,
+            }),
+        tx.insert(schema.idempotencyRecords).values({
+          userId,
+          key: effectiveKey,
+          requestFingerprint: JSON.stringify(req),
+          responseStatus: 201,
+          responseBody: orderResponse,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        }),
+      ]);
 
+      OrderService.recentIdempotencyKeys.set(effectiveKey, orderResponse);
       return orderResponse;
     });
 

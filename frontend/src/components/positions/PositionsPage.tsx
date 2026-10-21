@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Briefcase, History, ArrowDownRight, ArrowUpRight, CheckCircle2 } from 'lucide-react';
-import { getPositions } from '../../lib/api/positions';
+import { getPositions, closePosition } from '../../lib/api/positions';
 import { getOrders } from '../../lib/api/orders';
 import { wsClient } from '../../lib/websocket';
 import type { Position } from '../../contracts/v1/positions';
@@ -106,9 +106,24 @@ export default function PositionsPage() {
     };
   }, []);
 
-  const handleClosed = (id: string) => {
+  const handleClosed = async (id: string) => {
+    const targetPos = positions.find((p) => p.id === id);
+    // Optimistically remove position immediately from UI (0ms visual latency)
     setPositions((prev) => prev.filter((p) => p.id !== id));
-    loadTrades();
+
+    try {
+      const res = await closePosition({ positionId: id });
+      if (!res.success) {
+        // Rollback if server rejected
+        if (targetPos) setPositions((prev) => [...prev, targetPos]);
+        setError(res.message || 'Failed to close position.');
+      } else {
+        loadTrades();
+      }
+    } catch (err: any) {
+      if (targetPos) setPositions((prev) => [...prev, targetPos]);
+      setError(err?.message || 'Failed to close position.');
+    }
   };
 
   return (
