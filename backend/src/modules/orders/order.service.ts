@@ -6,6 +6,7 @@ import * as schema from '../../db/schema/index.js';
 import { AppError } from '../../common/errors/app-error.js';
 import type { SubmitOrderRequest, OrderResponse } from './order.types.js';
 import { livePriceCache } from '../market/price-cache.js';
+import { normalizeSymbol } from '../market/market.service.js';
 
 export class OrderService {
   private static readonly recentIdempotencyKeys = new Map<string, OrderResponse>();
@@ -47,7 +48,7 @@ export class OrderService {
     }
 
     // 2. Instrument Verification (Fast in-memory cache)
-    const cleanSymbol = req.symbol.toUpperCase();
+    const cleanSymbol = normalizeSymbol(req.symbol);
     let instrument = OrderService.instrumentsBySymbol.get(cleanSymbol);
     if (!instrument) {
       const [dbInst] = await this.db

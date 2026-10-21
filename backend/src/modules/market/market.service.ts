@@ -50,6 +50,26 @@ export interface CandleData {
   trading_day: number;
 }
 
+export function normalizeSymbol(symbol: string): string {
+  const upper = symbol.trim().toUpperCase().replace(/\s+/g, '_');
+  const aliases: Record<string, string> = {
+    'HDFCBANK': 'HDFC_BANK',
+    'INFY': 'INFOSYS',
+    'SBIN': 'SBI',
+    'NIFTY': 'NIFTY_50',
+    'BANKNIFTY': 'BANK_NIFTY',
+    'ASIANPAINTS': 'ASIAN_PAINTS',
+    'CRUDEOIL': 'CRUDE_OIL',
+    'DIVISLAB': 'DIVIS_LABS',
+    'DIVISLABS': 'DIVIS_LABS',
+    'MARUTI': 'MARUTI_SUZUKI',
+    'NETWEB': 'NETWEB_TECHNOLOGY',
+    'PBFINTECH': 'PB_FINTECH',
+    'SUNPHARMA': 'SUN_PHARMA',
+  };
+  return aliases[upper] || aliases[upper.replace(/_/g, '')] || upper;
+}
+
 export class MarketService {
   private static readonly instrumentsCache = new Map<string, typeof schema.instruments.$inferSelect>();
   private static readonly candlesCache = new Map<string, { data: CandleData[]; expiresAt: number }>();
@@ -155,7 +175,7 @@ export class MarketService {
   }
 
   public async getInstrument(symbol: string): Promise<InstrumentData> {
-    const clean = symbol.toUpperCase();
+    const clean = normalizeSymbol(symbol);
     let inst = MarketService.instrumentsCache.get(clean);
     if (!inst) {
       const [row] = await this.db
@@ -185,7 +205,7 @@ export class MarketService {
   }
 
   public async getLatestQuote(symbol: string): Promise<QuoteData> {
-    const clean = symbol.toUpperCase();
+    const clean = normalizeSymbol(symbol);
     const cached = livePriceCache.getBySymbol(clean);
     if (cached) {
       const lastPrice = cached.price;
@@ -324,7 +344,7 @@ export class MarketService {
   }
 
   public async getCandles(symbol: string, limit: number = 200): Promise<CandleData[]> {
-    const clean = symbol.toUpperCase();
+    const clean = normalizeSymbol(symbol);
     const cacheKey = `${clean}_${limit}`;
     const cachedCandles = MarketService.candlesCache.get(cacheKey);
     if (cachedCandles && Date.now() < cachedCandles.expiresAt) {

@@ -22,9 +22,6 @@ function fmt(n: number) {
   }).format(Math.abs(n));
 }
 
-// In-memory client cache for instant 0ms symbol switching
-const chartCache = new Map<string, { market: MarketState; candles: Candle[] }>();
-
 export default function ChartPage() {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
@@ -73,18 +70,6 @@ export default function ChartPage() {
           const syms = instruments.map((i) => i.symbol);
           setTradableSymbols(syms);
           setSymbol((prev) => (syms.includes(prev) ? prev : syms[0]));
-
-          // Background prefetch all remaining symbols for instant 0ms switching
-          setTimeout(() => {
-            syms.forEach(async (s) => {
-              if (!chartCache.has(s)) {
-                try {
-                  const [m, data] = await Promise.all([getMarketState(s), getMarketData(s)]);
-                  chartCache.set(s, { market: m, candles: data.candles });
-                } catch {}
-              }
-            });
-          }, 300);
         }
       })
       .catch(() => {});
@@ -99,32 +84,18 @@ export default function ChartPage() {
   }, []);
 
   const loadChart = useCallback(async (sym: string) => {
-    // If we have cached data for this symbol, display it instantly (0ms)
-    const cached = chartCache.get(sym);
-    if (cached) {
-      setMarket(cached.market);
-      setCandles(cached.candles);
-      setLoading(false);
-    } else {
-      if (candles.length === 0) {
-        setLoading(true);
-      }
-    }
+    setLoading(true);
     setError('');
-
     try {
       const [m, data] = await Promise.all([getMarketState(sym), getMarketData(sym)]);
       setMarket(m);
       setCandles(data.candles);
-      chartCache.set(sym, { market: m, candles: data.candles });
     } catch {
-      if (!cached) {
-        setError('Unable to load market data');
-      }
+      setError('Unable to load market data');
     } finally {
       setLoading(false);
     }
-  }, [candles.length]);
+  }, []);
 
   const loadPositions = useCallback(async () => {
     try {
@@ -134,11 +105,8 @@ export default function ChartPage() {
 
   useEffect(() => {
     loadChart(symbol);
-  }, [symbol, loadChart]);
-
-  useEffect(() => {
     loadPositions();
-  }, [loadPositions]);
+  }, [symbol, loadChart, loadPositions]);
 
   // Real-time market tick & portfolio subscriptions
   useEffect(() => {
@@ -362,9 +330,9 @@ export default function ChartPage() {
       </div>
 
       {/* Chart */}
-      {error && candles.length === 0 ? (
+      {error ? (
         <ErrorState message={error} onRetry={() => loadChart(symbol)} />
-      ) : loading && candles.length === 0 ? (
+      ) : loading ? (
         <div className="h-64 rounded-xl bg-[color:var(--surface-muted)] animate-pulse" />
       ) : (
         <div className="h-[260px] rounded-xl overflow-hidden border border-[color:var(--border)]">
