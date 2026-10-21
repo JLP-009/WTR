@@ -132,18 +132,25 @@ export class SimulationWorker {
         this.cachedDay = currentDay;
       }
 
-      for (const inst of instruments) {
-        const [candle] = await this.db
-          .select()
-          .from(schema.datasetCandles)
-          .where(
-            and(
-              eq(schema.datasetCandles.instrumentId, inst.id),
-              eq(schema.datasetCandles.tradingDay, currentDay),
-              eq(schema.datasetCandles.intervalIndex, currentInterval)
-            )
+      // Batch fetch all active candles for the current interval across all instruments in 1 query
+      const currentCandles = await this.db
+        .select()
+        .from(schema.datasetCandles)
+        .where(
+          and(
+            activeEvent.datasetId ? eq(schema.datasetCandles.datasetId, activeEvent.datasetId) : undefined,
+            eq(schema.datasetCandles.tradingDay, currentDay),
+            eq(schema.datasetCandles.intervalIndex, currentInterval)
           )
-          .limit(1);
+        );
+
+      const candleMap = new Map<string, (typeof currentCandles)[0]>();
+      for (const c of currentCandles) {
+        candleMap.set(c.instrumentId, c);
+      }
+
+      for (const inst of instruments) {
+        const candle = candleMap.get(inst.id);
 
         if (candle) {
           const openPrice = new Decimal(candle.open);
@@ -263,6 +270,9 @@ export class SimulationWorker {
         .where(eq(schema.portfolios.eventId, activeEvent.id));
 
       for (const port of allPortfolios) {
+        // Skip calculation for offline users to save server CPU
+        if (!this.wsGateway.isUserConnected(port.userId)) continue;
+
         const unrealized = userUnrealizedPnl.get(port.userId) || new Decimal(0);
         const invested = userInvestedAmount.get(port.userId) || new Decimal(0);
         const marketVal = userMarketValue.get(port.userId) || new Decimal(0);

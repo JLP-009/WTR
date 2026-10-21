@@ -14,6 +14,7 @@ export interface ClientConnection {
 
 export class WebSocketGateway {
   private readonly clients = new Set<ClientConnection>();
+  private readonly userClients = new Map<string, Set<ClientConnection>>();
   private heartbeatTimer?: NodeJS.Timeout;
 
   public constructor(private readonly app: FastifyInstance, private readonly env: Environment) {
@@ -26,6 +27,7 @@ export class WebSocketGateway {
       client.socket.terminate();
     }
     this.clients.clear();
+    this.userClients.clear();
   }
 
   private startHeartbeat() {
@@ -75,13 +77,21 @@ export class WebSocketGateway {
       client.isAlive = true;
     });
 
-    socket.on('close', () => {
+    const removeClient = () => {
       this.clients.delete(client);
-    });
+      if (client.user?.userId) {
+        const userSet = this.userClients.get(client.user.userId);
+        if (userSet) {
+          userSet.delete(client);
+          if (userSet.size === 0) {
+            this.userClients.delete(client.user.userId);
+          }
+        }
+      }
+    };
 
-    socket.on('error', () => {
-      this.clients.delete(client);
-    });
+    socket.on('close', removeClient);
+    socket.on('error', removeClient);
   }
 
   private async handleMessage(client: ClientConnection, message: { action?: string; token?: string; channels?: string[]; symbols?: string[] }) {
@@ -90,6 +100,13 @@ export class WebSocketGateway {
         const payload = await verifyAccessToken(message.token, this.env);
         client.user = payload;
         client.authenticated = true;
+
+        // Register in userClients map for instant O(1) user messaging
+        if (!this.userClients.has(payload.userId)) {
+          this.userClients.set(payload.userId, new Set());
+        }
+        this.userClients.get(payload.userId)!.add(client);
+
         this.send(client, {
           type: 'auth.success',
           data: { user_id: payload.publicId, participant_id: payload.participantId, role: payload.role },
@@ -144,15 +161,20 @@ export class WebSocketGateway {
     }
   }
 
+  public isUserConnected(userId: string): boolean {
+    return this.userClients.has(userId) && (this.userClients.get(userId)?.size ?? 0) > 0;
+  }
+
   public sendToUser(userId: string, channel: string, payload: unknown) {
-    for (const client of this.clients) {
-      if (client.authenticated && client.user?.userId === userId) {
-        this.send(client, {
-          channel,
-          type: `${channel}.update`,
-          data: payload,
-        });
-      }
+    const clients = this.userClients.get(userId);
+    if (!clients || clients.size === 0) return;
+
+    for (const client of clients) {
+      this.send(client, {
+        channel,
+        type: `${channel}.update`,
+        data: payload,
+      });
     }
   }
 
