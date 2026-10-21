@@ -10,9 +10,17 @@ class WebSocketClient {
   private isConnecting = false;
 
   constructor() {
-    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    this.url = `${wsProto}//${host}/api/v1/ws`;
+    const envWs = import.meta.env.VITE_WS_URL;
+    const apiUrl = import.meta.env.VITE_API_URL;
+    if (envWs) {
+      this.url = envWs;
+    } else if (apiUrl && apiUrl.startsWith('http')) {
+      this.url = apiUrl.replace(/^http(s?):/, 'ws$1:').replace(/\/+$/, '') + '/ws';
+    } else {
+      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      this.url = `${wsProto}//${host}/api/v1/ws`;
+    }
   }
 
   public connect() {
