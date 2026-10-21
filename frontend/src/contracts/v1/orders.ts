@@ -1,6 +1,6 @@
 // FRONTEND/API CONTRACT DRAFT — v1
 
-export type OrderSide = 'BUY' | 'SELL';
+export type OrderSide = 'BUY' | 'SELL' | 'CLOSE';
 
 export interface OrderRequest {
   symbol: string;

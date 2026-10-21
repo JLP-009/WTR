@@ -4,7 +4,7 @@ import ConfirmDialog from '../common/ConfirmDialog';
 
 interface PositionCardProps {
   position: Position;
-  onClosed: (id: string) => void;
+  onClosed: (id: string, symbol: string) => Promise<void> | void;
 }
 
 function fmt(n: number) {
@@ -13,11 +13,19 @@ function fmt(n: number) {
 
 export default function PositionCard({ position, onClosed }: PositionCardProps) {
   const [showConfirm, setShowConfirm] = useState(false);
+  const [closing, setClosing] = useState(false);
   const profit = (position.pnl ?? 0) >= 0;
 
-  const handleClose = () => {
-    setShowConfirm(false);
-    onClosed(position.id);
+  const handleClose = async () => {
+    setClosing(true);
+    try {
+      await onClosed(position.id, position.symbol);
+      setShowConfirm(false);
+    } catch {
+      // Handled by parent
+    } finally {
+      setClosing(false);
+    }
   };
 
   const closeLabel = position.side === 'LONG' ? 'Market Sell' : 'Market Buy';
@@ -82,12 +90,13 @@ export default function PositionCard({ position, onClosed }: PositionCardProps) 
       {/* Double Confirmation Modal */}
       <ConfirmDialog
         open={showConfirm}
-        onClose={() => setShowConfirm(false)}
+        onClose={() => !closing && setShowConfirm(false)}
         onConfirm={handleClose}
         title={`Close ${position.symbol} Position?`}
         description={`Are you sure you want to close your ${position.side} position of ${position.quantity} shares of ${position.symbol} at current market price (₹${fmt(position.ltp ?? 0)})?`}
         confirmLabel={`Confirm ${closeLabel}`}
         destructive={true}
+        loading={closing}
       />
     </div>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Briefcase, History, ArrowDownRight, ArrowUpRight, CheckCircle2 } from 'lucide-react';
+import { Briefcase, History, ArrowDownRight, ArrowUpRight, CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { getPositions, closePosition } from '../../lib/api/positions';
 import { getOrders } from '../../lib/api/orders';
 import { wsClient } from '../../lib/websocket';
@@ -30,6 +30,8 @@ export default function PositionsPage() {
   const [loading, setLoading] = useState(true);
   const [tradesLoading, setTradesLoading] = useState(false);
   const [error, setError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const loadPositions = async () => {
     try {
@@ -106,23 +108,23 @@ export default function PositionsPage() {
     };
   }, []);
 
-  const handleClosed = async (id: string) => {
+  const handleClosed = async (id: string, symbol?: string) => {
     const targetPos = positions.find((p) => p.id === id);
-    // Optimistically remove position immediately from UI (0ms visual latency)
-    setPositions((prev) => prev.filter((p) => p.id !== id));
+    const targetSymbol = symbol || targetPos?.symbol || 'Position';
+    setActionError('');
 
     try {
       const res = await closePosition({ positionId: id });
       if (!res.success) {
-        // Rollback if server rejected
-        if (targetPos) setPositions((prev) => [...prev, targetPos]);
-        setError(res.message || 'Failed to close position.');
+        setActionError(res.message || 'Failed to close position.');
       } else {
+        setPositions((prev) => prev.filter((p) => p.id !== id));
+        setSuccessMessage(`Position for ${targetSymbol} closed successfully.`);
+        setTimeout(() => setSuccessMessage(''), 4000);
         loadTrades();
       }
     } catch (err: any) {
-      if (targetPos) setPositions((prev) => [...prev, targetPos]);
-      setError(err?.message || 'Failed to close position.');
+      setActionError(err?.message || 'Failed to close position.');
     }
   };
 
@@ -165,6 +167,29 @@ export default function PositionsPage() {
           </button>
         </div>
       </div>
+
+      {/* Confirmation & Notification Banners */}
+      {successMessage && (
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-[color:var(--success)]/10 border border-[color:var(--success)]/30 text-xs font-semibold text-[color:var(--success)] animate-in fade-in duration-150">
+          <CheckCircle2 size={16} className="shrink-0" />
+          <span>{successMessage}</span>
+        </div>
+      )}
+      {actionError && (
+        <div className="flex items-center justify-between p-3 rounded-xl bg-[color:var(--danger)]/10 border border-[color:var(--danger)]/30 text-xs font-semibold text-[color:var(--danger)] animate-in fade-in duration-150">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} className="shrink-0" />
+            <span>{actionError}</span>
+          </div>
+          <button
+            onClick={() => setActionError('')}
+            className="p-1 rounded-md hover:bg-black/10 transition-colors"
+            aria-label="Dismiss error"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">

@@ -238,15 +238,28 @@ export default function ChartPage() {
 
   const confirmClosePosition = async () => {
     if (!currentPos || currentPos.quantity <= 0) return;
-    const prevPos = currentPos;
+    const closedSymbol = symbol;
+    const closedQty = currentPos.quantity;
     setShowCloseConfirm(false);
-    // Optimistically clear position display immediately
-    setCurrentPos(null);
-    const side = prevPos.side === 'LONG' ? 'SELL' : 'BUY';
+    setIsSubmitting(true);
+    setOrderError('');
+    setOrderSuccess('');
+
     try {
-      await executeOrder(side, prevPos.quantity);
-    } catch {
-      setCurrentPos(prevPos);
+      const res = await submitOrder({ symbol: closedSymbol, side: 'CLOSE', quantity: closedQty });
+      if (res.status === 'ACCEPTED') {
+        setOrderSuccess(`Position for ${closedSymbol} closed successfully.`);
+        setTimeout(() => setOrderSuccess(''), 4000);
+        // Clear closed position from local state
+        setPositions((prev) => prev.filter((p) => p.symbol !== closedSymbol));
+        loadPositions();
+      } else {
+        setOrderError(res.message || 'Failed to close position.');
+      }
+    } catch (err: any) {
+      setOrderError(err?.message || 'Failed to close position. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
