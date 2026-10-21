@@ -6,7 +6,10 @@ import type { Environment } from '../config/env.js';
 
 export const securityPlugin = (env: Environment) => fp(async (app) => {
   await app.register(cors, {
-    origin: env.NODE_ENV === 'production' ? env.CORS_ORIGIN : true,
+    origin: (origin, cb) => {
+      // Allow all origins (localhost, render, vercel, mobile browsers)
+      cb(null, true);
+    },
     credentials: true,
   });
   await app.register(helmet);
