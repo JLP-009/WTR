@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ClubLogo from '../branding/ClubLogo';
 import { useAuth } from '../../contexts/AuthContext';
-import { resetPassword } from '../../lib/api/auth';
-import { ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { resetPassword, checkParticipantIdAvailability } from '../../lib/api/auth';
+import { ArrowLeft, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -17,6 +17,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   // Login state
   const [loginParticipantId, setLoginParticipantId] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
 
   // Register state
   const [regFirstName, setRegFirstName] = useState('');
@@ -24,6 +25,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [regParticipantId, setRegParticipantId] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
 
   // Forgot Password state
   const [forgotParticipantId, setForgotParticipantId] = useState('');
@@ -32,14 +35,56 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
   const [forgotSuccess, setForgotSuccess] = useState('');
+  const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
+  const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
 
   // Feedback states
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [idCheckStatus, setIdCheckStatus] = useState<{
+    status: 'idle' | 'checking' | 'available' | 'taken';
+    message?: string;
+  }>({ status: 'idle' });
+
+  // Debounced check to verify if the requested Participant ID already exists
+  useEffect(() => {
+    const cleanId = regParticipantId.trim().toUpperCase();
+    if (!cleanId || mode !== 'register') {
+      setIdCheckStatus({ status: 'idle' });
+      return;
+    }
+    if (cleanId.length < 3) {
+      setIdCheckStatus({ status: 'idle' });
+      return;
+    }
+
+    let isCancelled = false;
+    setIdCheckStatus({ status: 'checking' });
+
+    const timer = setTimeout(async () => {
+      const res = await checkParticipantIdAvailability(cleanId);
+      if (!isCancelled) {
+        if (res.available) {
+          setIdCheckStatus({ status: 'available' });
+        } else {
+          setIdCheckStatus({
+            status: 'taken',
+            message: res.reason || `This ID '${cleanId}' already exists. Please select another user ID.`,
+          });
+        }
+      }
+    }, 300);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [regParticipantId, mode]);
 
   const resetErrors = () => {
     setError('');
     setForgotSuccess('');
+    setIdCheckStatus({ status: 'idle' });
   };
 
   const switchMode = (newMode: AuthMode) => {
@@ -75,6 +120,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }
     if (!regParticipantId.trim()) {
       setError('Please enter a unique Participant ID / Username');
+      return;
+    }
+    const cleanId = regParticipantId.trim().toUpperCase();
+    if (idCheckStatus.status === 'taken') {
+      setError(idCheckStatus.message || `This ID '${cleanId}' already exists. Please select another user ID.`);
       return;
     }
     if (regPassword.length < 6) {
@@ -222,15 +272,26 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                   Forgot?
                 </button>
               </div>
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete="current-password"
-                required
-                className="w-full h-11 px-3.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
-              />
+              <div className="relative">
+                <input
+                  type={showLoginPassword ? 'text' : 'password'}
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  required
+                  className="w-full h-11 pl-3.5 pr-10 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPassword(!showLoginPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)] transition-colors p-1"
+                  title={showLoginPassword ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                >
+                  {showLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -282,9 +343,26 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold tracking-wider uppercase text-[color:var(--foreground-secondary)] mb-1">
-                Choose Participant ID / Username
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-semibold tracking-wider uppercase text-[color:var(--foreground-secondary)]">
+                  Choose Participant ID / Username
+                </label>
+                {idCheckStatus.status === 'checking' && (
+                  <span className="text-[10px] text-[color:var(--foreground-muted)] font-mono animate-pulse">
+                    Checking…
+                  </span>
+                )}
+                {idCheckStatus.status === 'available' && (
+                  <span className="text-[10px] text-emerald-500 font-semibold font-mono flex items-center gap-1">
+                    ✓ Available
+                  </span>
+                )}
+                {idCheckStatus.status === 'taken' && (
+                  <span className="text-[10px] text-[color:var(--danger)] font-semibold font-mono flex items-center gap-1">
+                    ✗ Already exists
+                  </span>
+                )}
+              </div>
               <input
                 type="text"
                 value={regParticipantId}
@@ -292,36 +370,69 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 placeholder="e.g. TRADER_JOHN"
                 autoCapitalize="characters"
                 required
-                className="w-full h-11 px-3.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm font-mono tracking-wider focus:outline-none focus:border-[color:var(--accent)] transition-colors"
+                className={`w-full h-11 px-3.5 rounded-xl border bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm font-mono tracking-wider focus:outline-none transition-colors ${
+                  idCheckStatus.status === 'taken'
+                    ? 'border-[color:var(--danger)] focus:border-[color:var(--danger)]'
+                    : idCheckStatus.status === 'available'
+                    ? 'border-emerald-500/60 focus:border-emerald-500'
+                    : 'border-[color:var(--border)] focus:border-[color:var(--accent)]'
+                }`}
               />
+              {idCheckStatus.status === 'taken' && (
+                <p className="mt-1 text-[11px] font-medium text-[color:var(--danger)]">
+                  {idCheckStatus.message || 'This ID already exists. Please select another user ID.'}
+                </p>
+              )}
             </div>
 
             <div>
               <label className="block text-[11px] font-semibold tracking-wider uppercase text-[color:var(--foreground-secondary)] mb-1">
                 Password
               </label>
-              <input
-                type="password"
-                value={regPassword}
-                onChange={(e) => setRegPassword(e.target.value)}
-                placeholder="Min 6 characters"
-                required
-                className="w-full h-11 px-3.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
-              />
+              <div className="relative">
+                <input
+                  type={showRegPassword ? 'text' : 'password'}
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value)}
+                  placeholder="Min 6 characters"
+                  required
+                  className="w-full h-11 pl-3.5 pr-10 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRegPassword(!showRegPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)] transition-colors p-1"
+                  title={showRegPassword ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                >
+                  {showRegPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             <div>
               <label className="block text-[11px] font-semibold tracking-wider uppercase text-[color:var(--foreground-secondary)] mb-1">
                 Confirm Password
               </label>
-              <input
-                type="password"
-                value={regConfirmPassword}
-                onChange={(e) => setRegConfirmPassword(e.target.value)}
-                placeholder="Re-enter password"
-                required
-                className="w-full h-11 px-3.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
-              />
+              <div className="relative">
+                <input
+                  type={showRegConfirmPassword ? 'text' : 'password'}
+                  value={regConfirmPassword}
+                  onChange={(e) => setRegConfirmPassword(e.target.value)}
+                  placeholder="Re-enter password"
+                  required
+                  className="w-full h-11 pl-3.5 pr-10 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRegConfirmPassword(!showRegConfirmPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)] transition-colors p-1"
+                  title={showRegConfirmPassword ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                >
+                  {showRegConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -422,28 +533,50 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                   <label className="block text-[11px] font-semibold tracking-wider uppercase text-[color:var(--foreground-secondary)] mb-1">
                     New Password
                   </label>
-                  <input
-                    type="password"
-                    value={forgotNewPassword}
-                    onChange={(e) => setForgotNewPassword(e.target.value)}
-                    placeholder="Min 6 characters"
-                    required
-                    className="w-full h-11 px-3.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showForgotNewPassword ? 'text' : 'password'}
+                      value={forgotNewPassword}
+                      onChange={(e) => setForgotNewPassword(e.target.value)}
+                      placeholder="Min 6 characters"
+                      required
+                      className="w-full h-11 pl-3.5 pr-10 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)] transition-colors p-1"
+                      title={showForgotNewPassword ? 'Hide password' : 'Show password'}
+                      tabIndex={-1}
+                    >
+                      {showForgotNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-semibold tracking-wider uppercase text-[color:var(--foreground-secondary)] mb-1">
                     Confirm New Password
                   </label>
-                  <input
-                    type="password"
-                    value={forgotConfirmPassword}
-                    onChange={(e) => setForgotConfirmPassword(e.target.value)}
-                    placeholder="Re-enter new password"
-                    required
-                    className="w-full h-11 px-3.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showForgotConfirmPassword ? 'text' : 'password'}
+                      value={forgotConfirmPassword}
+                      onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                      placeholder="Re-enter new password"
+                      required
+                      className="w-full h-11 pl-3.5 pr-10 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground)] placeholder:text-[color:var(--foreground-muted)] text-sm focus:outline-none focus:border-[color:var(--accent)] transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotConfirmPassword(!showForgotConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)] transition-colors p-1"
+                      title={showForgotConfirmPassword ? 'Hide password' : 'Show password'}
+                      tabIndex={-1}
+                    >
+                      {showForgotConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
 
                 {error && (

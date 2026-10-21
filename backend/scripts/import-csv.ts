@@ -4,7 +4,7 @@ import { createDatabase } from '../src/db/client.js';
 import * as schema from '../src/db/schema/index.js';
 import { loadEnvironment } from '../src/config/env.js';
 import { publicId } from '../src/db/seed/shared.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 
 function parseCSVLine(line: string): string[] {
   return line.split(',').map((s) => s.trim().replace(/^["']|["']$/g, ''));
@@ -71,17 +71,21 @@ export async function importPath(targetPath: string, datasetName: string = 'mast
     if (lines.length < 2) continue;
 
     const headers = parseCSVLine(lines[0].toLowerCase());
-    const fileSymbol = path.basename(filePath, '.csv').toUpperCase();
+    const fileSymbol = path.basename(filePath, '.csv').trim().toUpperCase().replace(/\s+/g, '_');
 
     // Ensure instrument exists
     if (!instrumentCache.has(fileSymbol)) {
+      const isIndex = fileSymbol.includes('NIFTY');
+      const isCommodity = ['GOLD', 'SILVER', 'COPPER', 'CRUDE_OIL'].includes(fileSymbol);
+      const instType = isIndex ? 'INDEX' : isCommodity ? 'FUTURES' : 'EQUITY';
+
       const [inst] = await db
         .insert(schema.instruments)
         .values({
           symbol: fileSymbol,
-          name: `${fileSymbol} Index/Equity`,
-          instrumentType: fileSymbol.includes('NIFTY') ? 'INDEX' : 'EQUITY',
-          exchange: 'NSE',
+          name: fileSymbol.replace(/_/g, ' '),
+          instrumentType: instType,
+          exchange: isCommodity ? 'MCX' : 'NSE',
           tickSize: '0.05',
           lotSize: 1,
         })
@@ -107,7 +111,7 @@ export async function importPath(targetPath: string, datasetName: string = 'mast
         row[h] = values[idx];
       });
 
-      const symbol = (row.symbol || row.ticker || fileSymbol).toUpperCase();
+      const symbol = fileSymbol;
       const day = parseInt(row.simulation_day || row.trading_day || row.day || '1', 10);
       maxDay = Math.max(maxDay, day);
 
@@ -121,28 +125,6 @@ export async function importPath(targetPath: string, datasetName: string = 'mast
         } else {
           intervalIdx = (i - 1) % 72;
         }
-      }
-
-      if (!instrumentCache.has(symbol)) {
-        const [inst] = await db
-          .insert(schema.instruments)
-          .values({
-            symbol,
-            name: `${symbol} Index/Equity`,
-            instrumentType: symbol.includes('NIFTY') ? 'INDEX' : 'EQUITY',
-            exchange: 'NSE',
-            tickSize: '0.05',
-            lotSize: 1,
-          })
-          .onConflictDoNothing({ target: schema.instruments.symbol })
-          .returning();
-
-        const resolved = inst || (await db
-          .select()
-          .from(schema.instruments)
-          .where(eq(schema.instruments.symbol, symbol)))[0];
-
-        instrumentCache.set(symbol, resolved.id);
       }
 
       const instrumentId = instrumentCache.get(symbol)!;
@@ -228,36 +210,59 @@ export async function importPath(targetPath: string, datasetName: string = 'mast
     .set({ totalDays: maxDay })
     .where(eq(schema.datasets.id, datasetRecord.id));
 
-  // Get or create event linked to this dataset
-  const [activeEvent] = await db
-    .insert(schema.events)
-    .values({
-      publicId: publicId('evt'),
-      datasetId: datasetRecord.id,
-      status: 'SETUP',
-      totalSimulationDays: maxDay,
-      simulationSpeed: 1,
-    })
-    .onConflictDoNothing()
-    .returning();
-
-  const eventRecord = activeEvent || (await db
+  // Find existing event or create one
+  const [existingEvent] = await db
     .select()
     .from(schema.events)
-    .orderBy(schema.events.createdAt))[0];
+    .orderBy(desc(schema.events.createdAt))
+    .limit(1);
 
-  if (eventRecord) {
+  let eventRecord = existingEvent;
+  if (existingEvent) {
+    await db
+      .update(schema.events)
+      .set({
+        datasetId: datasetRecord.id,
+        totalSimulationDays: maxDay,
+      })
+      .where(eq(schema.events.id, existingEvent.id));
+  } else {
+    const [created] = await db
+      .insert(schema.events)
+      .values({
+        publicId: publicId('evt'),
+        datasetId: datasetRecord.id,
+        status: 'RUNNING',
+        totalSimulationDays: maxDay,
+        simulationSpeed: 1,
+      })
+      .returning();
+    eventRecord = created;
+
     await db
       .insert(schema.simulationStates)
       .values({
         eventId: eventRecord.id,
-        status: 'STOPPED',
-        dayStatus: 'PRE_OPEN',
-        marketStatus: 'PRE_OPEN',
+        status: 'RUNNING',
+        dayStatus: 'OPEN',
+        marketStatus: 'OPEN',
         simulationDay: 1,
         intervalIndex: 0,
       })
       .onConflictDoNothing();
+  }
+
+  // Link all imported instruments to event_instruments
+  if (eventRecord) {
+    for (const instId of instrumentCache.values()) {
+      await db
+        .insert(schema.eventInstruments)
+        .values({
+          eventId: eventRecord.id,
+          instrumentId: instId,
+        })
+        .onConflictDoNothing();
+    }
   }
 
   console.log(`\n🎉 Import Complete!`);
@@ -268,7 +273,7 @@ export async function importPath(targetPath: string, datasetName: string = 'mast
   process.exit(0);
 }
 
-const inputPath = process.argv[2] || 'data/datasets';
+const inputPath = process.argv[2] || path.join('data', 'production_dataset');
 importPath(inputPath).catch((err) => {
   console.error('Import error:', err);
   process.exit(1);

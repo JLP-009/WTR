@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Briefcase, CandlestickChart, TrendingUp, Wallet, LayoutDashboard, Trophy } from 'lucide-react';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -13,6 +13,9 @@ import PnlPage from './components/pnl/PnlPage';
 import BalancePage from './components/balance/BalancePage';
 import LeaderboardPage from './components/leaderboard/LeaderboardPage';
 import AdminApp from './admin/AdminApp';
+import EventEndedThankYou from './components/common/EventEndedThankYou';
+import { getMarketStatus } from './lib/api/market';
+import { wsClient } from './lib/websocket';
 
 export type Route = 'dashboard' | 'positions' | 'chart' | 'pnl' | 'balance' | 'leaderboard';
 
@@ -30,17 +33,64 @@ const SIDEBAR_ITEMS: {
 ];
 
 function AppContent() {
-  const { isAuthenticated, participant } = useAuth();
+  const { isAuthenticated, participant, logout } = useAuth();
   const [route, setRoute] = useState<Route>('dashboard');
   const [prevRoute, setPrevRoute] = useState<Route>('dashboard');
+  const [eventStatus, setEventStatus] = useState<string>('RUNNING');
+
+  const checkStatus = () => {
+    getMarketStatus()
+      .then((res) => {
+        if (res?.event_status) {
+          setEventStatus(res.event_status);
+        }
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    // Check initial event status from backend
+    checkStatus();
+
+    // Subscribe to real-time status updates via WebSocket
+    const unsubMarket = wsClient.subscribe('market_status', (data) => {
+      if (data?.event_status) {
+        setEventStatus(data.event_status);
+      } else if (data?.status === 'ENDED' || data?.event_status === 'ENDED') {
+        setEventStatus('ENDED');
+      }
+    });
+
+    const unsubEvent = wsClient.subscribe('event', (data) => {
+      if (data?.status) {
+        setEventStatus(data.status);
+      }
+    });
+
+    return () => {
+      unsubMarket();
+      unsubEvent();
+    };
+  }, []);
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={() => setRoute('dashboard')} />;
   }
 
-  // Admin users go to the isolated admin panel — no participant UI is rendered for them
+  // Admin users go to the isolated admin panel — never see the black screen
   if (participant?.role === 'ADMIN') {
     return <AdminApp />;
+  }
+
+  // Regular participants: Show black screen with thank-you message when event has ended
+  if (eventStatus === 'ENDED') {
+    return (
+      <EventEndedThankYou
+        participant={participant}
+        onLogout={logout}
+        onRefresh={checkStatus}
+      />
+    );
   }
 
   const handleNavigate = (r: Route) => {

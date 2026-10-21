@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Clock, Play, Radio, AlertTriangle, CheckCircle2, Megaphone } from 'lucide-react';
+import { Clock, Play, Radio, AlertTriangle, CheckCircle2, Megaphone, SkipForward } from 'lucide-react';
 import { wsClient } from '../../../lib/websocket';
 
 interface DaySessionTimerProps {
@@ -10,6 +10,7 @@ interface DaySessionTimerProps {
   dayStatus?: string;
   simulationTime?: string | null;
   onStartNextDay?: () => void;
+  onSkipDay?: () => void;
   onOpenNews?: () => void;
   actionLoading?: boolean;
 }
@@ -22,6 +23,7 @@ export default function DaySessionTimer({
   dayStatus = 'PRE_OPEN',
   simulationTime = '09:15:00',
   onStartNextDay,
+  onSkipDay,
   onOpenNews,
   actionLoading = false,
 }: DaySessionTimerProps) {
@@ -139,6 +141,18 @@ export default function DaySessionTimer({
             >
               <Megaphone size={14} className="text-[color:var(--accent)]" />
               <span>Broadcast News</span>
+            </button>
+          )}
+
+          {onSkipDay && (
+            <button
+              onClick={onSkipDay}
+              disabled={actionLoading}
+              title="Skip remainder of this day and advance to the next simulation day"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 transition-colors shadow-sm disabled:opacity-50"
+            >
+              <SkipForward size={14} />
+              <span>Skip Day</span>
             </button>
           )}
 

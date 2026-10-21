@@ -80,7 +80,7 @@ export async function startAdminEvent(_key: string = generateIdempotencyKey()): 
     await api.post('/admin/event/start');
     return getAdminEvent();
   } catch {
-    return mockStartAdminEvent(_key);
+    return mockStartAdminEvent();
   }
 }
 
@@ -89,7 +89,7 @@ export async function pauseAdminEvent(_key: string = generateIdempotencyKey()): 
     await api.post('/admin/event/pause');
     return getAdminEvent();
   } catch {
-    return mockPauseAdminEvent(_key);
+    return mockPauseAdminEvent();
   }
 }
 
@@ -98,7 +98,7 @@ export async function resumeAdminEvent(_key: string = generateIdempotencyKey()):
     await api.post('/admin/event/resume');
     return getAdminEvent();
   } catch {
-    return mockResumeAdminEvent(_key);
+    return mockResumeAdminEvent();
   }
 }
 
@@ -107,7 +107,7 @@ export async function endAdminEvent(_key: string = generateIdempotencyKey()): Pr
     await api.post('/admin/event/end');
     return getAdminEvent();
   } catch {
-    return mockEndAdminEvent(_key);
+    return mockEndAdminEvent();
   }
 }
 
@@ -175,7 +175,7 @@ export async function startAdminSimulation(_key: string = generateIdempotencyKey
     await api.post('/admin/event/start');
     return getAdminSimulation();
   } catch {
-    return mockStartAdminSimulation(_key);
+    return mockStartAdminSimulation();
   }
 }
 
@@ -184,7 +184,7 @@ export async function pauseAdminSimulation(_key: string = generateIdempotencyKey
     await api.post('/admin/event/pause');
     return getAdminSimulation();
   } catch {
-    return mockPauseAdminSimulation(_key);
+    return mockPauseAdminSimulation();
   }
 }
 
@@ -193,30 +193,40 @@ export async function resumeAdminSimulation(_key: string = generateIdempotencyKe
     await api.post('/admin/event/resume');
     return getAdminSimulation();
   } catch {
-    return mockResumeAdminSimulation(_key);
+    return mockResumeAdminSimulation();
   }
 }
 
 export async function closeDay(_key: string = generateIdempotencyKey()): Promise<AdminSimulationState> {
   try {
-    await api.post('/admin/market/halt');
+    await api.post('/admin/simulation/close-day');
     return getAdminSimulation();
   } catch {
-    return mockCloseDay(_key);
+    return mockCloseDay();
   }
 }
 export const closeDayAdmin = closeDay;
 
-export async function nextDay(_key: string = generateIdempotencyKey()): Promise<AdminSimulationState> {
+export async function nextDay(dayOrKey?: number | string, _key: string = generateIdempotencyKey()): Promise<AdminSimulationState> {
+  const day = typeof dayOrKey === 'number' ? dayOrKey : undefined;
   try {
-    await api.post('/admin/simulation/next-day');
+    await api.post('/admin/simulation/next-day', typeof day === 'number' ? { day } : {});
     return getAdminSimulation();
   } catch {
-    return mockNextDay(_key);
+    return mockNextDay();
   }
 }
 export const nextDayAdmin = nextDay;
 export const advanceAdminSimulationDay = nextDay;
+
+export async function setSimulationDay(day: number, _key: string = generateIdempotencyKey()): Promise<AdminSimulationState> {
+  try {
+    await api.post('/admin/simulation/set-day', { day });
+    return getAdminSimulation();
+  } catch {
+    return mockNextDay();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Market Controls
@@ -234,7 +244,7 @@ export async function openMarket(_key: string = generateIdempotencyKey()): Promi
     await api.post('/admin/market/resume');
     return getAdminMarket();
   } catch {
-    return mockOpenMarket(_key);
+    return mockOpenMarket();
   }
 }
 export const openMarketAdmin = openMarket;
@@ -244,7 +254,7 @@ export async function pauseMarket(_key: string = generateIdempotencyKey()): Prom
     await api.post('/admin/event/pause');
     return getAdminMarket();
   } catch {
-    return mockPauseMarket(_key);
+    return mockPauseMarket();
   }
 }
 export const pauseMarketAdmin = pauseMarket;
@@ -254,7 +264,7 @@ export async function resumeMarket(_key: string = generateIdempotencyKey()): Pro
     await api.post('/admin/market/resume');
     return getAdminMarket();
   } catch {
-    return mockResumeMarket(_key);
+    return mockResumeMarket();
   }
 }
 export const resumeMarketAdmin = resumeMarket;
@@ -264,17 +274,17 @@ export async function haltMarket(reason?: string, _key: string = generateIdempot
     await api.post('/admin/market/halt', { reason });
     return getAdminMarket();
   } catch {
-    return mockHaltMarket(reason, _key);
+    return mockHaltMarket();
   }
 }
 export const haltMarketAdmin = haltMarket;
 
 export async function closeMarket(_key: string = generateIdempotencyKey()): Promise<AdminMarketState> {
   try {
-    await api.post('/admin/market/halt');
+    await api.post('/admin/simulation/close-day');
     return getAdminMarket();
   } catch {
-    return mockCloseMarket(_key);
+    return mockCloseMarket();
   }
 }
 export const closeMarketAdmin = closeMarket;
@@ -302,7 +312,7 @@ export async function enableParticipant(participantId: string, _key: string = ge
   try {
     return await api.post<AdminParticipant>(`/admin/participants/${participantId}/enable`);
   } catch {
-    return mockEnableParticipant(participantId, _key);
+    return mockEnableParticipant(participantId);
   }
 }
 export const enableAdminParticipant = enableParticipant;
@@ -311,7 +321,7 @@ export async function disableParticipant(participantId: string, _key: string = g
   try {
     return await api.post<AdminParticipant>(`/admin/participants/${participantId}/disable`);
   } catch {
-    return mockDisableParticipant(participantId, _key);
+    return mockDisableParticipant(participantId);
   }
 }
 export const disableAdminParticipant = disableParticipant;
@@ -364,7 +374,7 @@ export async function createAdminNews(req: CreateNewsRequest, _key: string = gen
   try {
     return await api.post<AdminNewsItem>('/news', req);
   } catch {
-    return mockCreateAdminNews(req, _key);
+    return mockCreateAdminNews(req);
   }
 }
 
@@ -393,5 +403,17 @@ export async function getAdminDatasets(): Promise<AdminDataset[]> {
     return await api.get<AdminDataset[]>('/admin/datasets');
   } catch {
     return mockGetAdminDatasets();
+  }
+}
+
+export async function resetAdminTrades(): Promise<{ message: string }> {
+  try {
+    const res = await api.post<{ message: string }>('/admin/trades/reset');
+    return res;
+  } catch (err) {
+    throw new AdminApiError(
+      'INTERNAL_ERROR',
+      err instanceof Error ? err.message : 'Failed to reset trades and portfolios'
+    );
   }
 }

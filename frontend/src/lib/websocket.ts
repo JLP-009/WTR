@@ -33,7 +33,7 @@ class WebSocketClient {
         }
         this.send({
           action: 'subscribe',
-          channels: ['market', 'orders', 'portfolio', 'leaderboard', 'news'],
+          channels: ['market', 'orders', 'portfolio', 'leaderboard', 'news', 'market_status', 'event'],
         });
       };
 

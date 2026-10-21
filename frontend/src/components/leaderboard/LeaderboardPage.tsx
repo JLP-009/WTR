@@ -78,8 +78,10 @@ export default function LeaderboardPage({ onBack }: LeaderboardPageProps) {
 
   useEffect(() => { load(); }, []);
 
-  const topEntries = data?.entries.filter((e) => !e.isCurrentUser) ?? [];
-  const userEntry = data?.entries.find((e) => e.isCurrentUser);
+  const allEntries = data?.entries ?? [];
+  const topEntries = allEntries.slice(0, 50);
+  const userInTop = topEntries.some((e) => e.isCurrentUser);
+  const userEntry = allEntries.find((e) => e.isCurrentUser);
 
   return (
     <div className="space-y-4">
@@ -108,10 +110,19 @@ export default function LeaderboardPage({ onBack }: LeaderboardPageProps) {
       ) : data ? (
         <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-2xl px-4">
           {topEntries.map((entry) => (
-            <EntryRow key={`rank-${entry.participantId}-${entry.rank}`} entry={entry} isCurrentUser={false} />
+            <EntryRow
+              key={`rank-${entry.participantId}-${entry.rank}`}
+              entry={entry}
+              isCurrentUser={entry.isCurrentUser}
+            />
           ))}
-          {userEntry && (
-            <EntryRow key={`user-${userEntry.participantId}`} entry={userEntry} isCurrentUser divider />
+          {!userInTop && userEntry && (
+            <EntryRow
+              key={`user-${userEntry.participantId}`}
+              entry={userEntry}
+              isCurrentUser
+              divider
+            />
           )}
         </div>
       ) : null}

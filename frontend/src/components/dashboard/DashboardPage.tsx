@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, Circle } from 'lucide-react';
+import { ArrowUpRight, Circle, LogOut } from 'lucide-react';
 import { getPortfolioSummary, normalizePortfolioSummary } from '../../lib/api/portfolio';
 import { getMarketState } from '../../lib/api/market';
 import { getLeaderboard } from '../../lib/api/leaderboard';
@@ -8,6 +8,7 @@ import type { MarketState } from '../../contracts/v1/market';
 import { useAuth } from '../../contexts/AuthContext';
 import { SkeletonCard } from '../common/LoadingState';
 import ErrorState from '../common/ErrorState';
+import ConfirmDialog from '../common/ConfirmDialog';
 import type { Route } from '../../App';
 
 import { api } from '../../lib/api/client';
@@ -30,13 +31,14 @@ interface DashboardPageProps {
 }
 
 export default function DashboardPage({ onNavigate }: DashboardPageProps) {
-  const { participant } = useAuth();
+  const { participant, logout } = useAuth();
   const [portfolio, setPortfolio] = useState<PortfolioSummary | null>(null);
   const [market, setMarket] = useState<MarketState | null>(null);
   const [rank, setRank] = useState<{ current: number; total: number } | null>(null);
   const [latestNews, setLatestNews] = useState<NewsItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -75,13 +77,13 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
       }
     });
     const unsubMarket = wsClient.subscribe('market', (tick: any) => {
-      if (tick && (tick.symbol === 'NIFTY' || tick.symbol === 'NIFTY 50')) {
+      if (tick && (tick.symbol === 'NIFTY_50' || tick.symbol === 'NIFTY 50' || tick.symbol === 'NIFTY')) {
         const ltp = parseFloat(tick.last_price ?? tick.ltp ?? tick.close_price);
         const change = parseFloat(tick.change ?? '0');
         const changePct = parseFloat(tick.change_percent ?? tick.changePct ?? '0');
         if (!isNaN(ltp)) {
           setMarket({
-            symbol: 'NIFTY',
+            symbol: 'NIFTY_50',
             status: 'LIVE',
             ltp,
             change,
@@ -103,12 +105,31 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
 
   return (
     <div className="space-y-5">
-      {/* Greeting */}
-      <div className="pt-1">
-        <p className="text-xs text-[color:var(--foreground-muted)] uppercase tracking-widest">{greeting}</p>
-        <h2 className="text-2xl font-semibold text-[color:var(--foreground)] mt-0.5">
-          {participant?.displayName ?? 'Trader'}
-        </h2>
+      {/* Greeting and Header Bar */}
+      <div className="pt-1 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs text-[color:var(--foreground-muted)] uppercase tracking-widest">{greeting}</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <h2 className="text-2xl font-semibold text-[color:var(--foreground)]">
+              {participant?.displayName ?? 'Trader'}
+            </h2>
+            {participant?.participantId && (
+              <span className="px-2 py-0.5 text-[10px] font-mono font-bold uppercase rounded-md bg-[color:var(--surface-muted)] text-[color:var(--accent)] border border-[color:var(--border)]">
+                {participant.participantId}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Log Out Button */}
+        <button
+          onClick={() => setShowLogoutConfirm(true)}
+          title="Log out of account"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] text-[color:var(--foreground-muted)] hover:text-[color:var(--danger)] hover:border-[color:var(--danger)]/30 hover:bg-[color:var(--danger)]/5 transition-all text-xs font-semibold shrink-0 mt-1 shadow-sm"
+        >
+          <LogOut size={14} />
+          <span>Log Out</span>
+        </button>
       </div>
 
       {loading ? (
@@ -243,14 +264,53 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
                 <p className="text-xs font-semibold text-[color:var(--foreground)] truncate">
                   {latestNews.title}
                 </p>
-                <p className="text-xs text-[color:var(--foreground-secondary)] line-clamp-2">
-                  {latestNews.body}
-                </p>
+                <div className="text-xs text-[color:var(--foreground-secondary)] space-y-0.5">
+                  {latestNews.body.split(/(?<=\.)\s+(?=[A-Z])/).slice(0, 2).map((s, i) => (
+                    <p key={i} className="flex gap-1.5">
+                      <span className="text-[color:var(--accent)] shrink-0">•</span>
+                      <span>{s.trim()}</span>
+                    </p>
+                  ))}
+                  {latestNews.body.split(/(?<=\.)\s+(?=[A-Z])/).length > 2 && (
+                    <p className="text-[10px] text-[color:var(--accent)] font-medium mt-1">
+                      +{latestNews.body.split(/(?<=\.)\s+(?=[A-Z])/).length - 2} more updates — tap bell to read all
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           )}
+          {/* Bottom Account & Log Out Bar */}
+          <div className="pt-3 pb-8 flex items-center justify-between border-t border-[color:var(--border)] text-xs text-[color:var(--foreground-muted)]">
+            <div>
+              <span>Signed in as </span>
+              <span className="font-semibold text-[color:var(--foreground)] font-mono">{participant?.participantId}</span>
+            </div>
+            <button
+              onClick={() => setShowLogoutConfirm(true)}
+              className="flex items-center gap-1.5 font-semibold text-[color:var(--danger)] hover:underline"
+            >
+              <LogOut size={13} />
+              <span>Log Out</span>
+            </button>
+          </div>
         </>
       ) : null}
+
+      {/* Logout Confirmation Dialog */}
+      <ConfirmDialog
+        open={showLogoutConfirm}
+        onClose={() => setShowLogoutConfirm(false)}
+        onConfirm={() => {
+          setShowLogoutConfirm(false);
+          logout();
+        }}
+        title="Log Out"
+        description="Are you sure you want to log out of your trading account? You can log back in at any time from this device."
+        confirmLabel="Yes, Log Out"
+        cancelLabel="Cancel"
+        destructive={true}
+      />
     </div>
   );
 }

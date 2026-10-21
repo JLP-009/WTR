@@ -35,3 +35,7 @@ Thumbs.db
 # Coverage / Testing
 coverage/
 .nyc_output/
+
+# Antigravity & Tooling
+graphify-out/
+

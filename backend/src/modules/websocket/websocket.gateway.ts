@@ -46,7 +46,7 @@ export class WebSocketGateway {
     const client: ClientConnection = {
       socket,
       authenticated: false,
-      subscriptions: new Set(['market', 'news', 'portfolio', 'positions', 'leaderboard', 'orders']),
+      subscriptions: new Set(['market', 'news', 'portfolio', 'positions', 'leaderboard', 'orders', 'market_status', 'event']),
       symbols: new Set(),
       isAlive: true,
     };

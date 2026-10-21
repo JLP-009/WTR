@@ -1,9 +1,11 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { eq, desc, sql, count } from 'drizzle-orm';
+import { eq, desc, sql, count, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
+import { Decimal } from 'decimal.js';
 import * as schema from '../../db/schema/index.js';
 import { AppError } from '../../common/errors/app-error.js';
 import { MarketService } from '../market/market.service.js';
+import { livePriceCache } from '../market/price-cache.js';
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
   // All admin routes require admin privileges
@@ -218,6 +220,130 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     return { data: { status: 'RUNNING' }, request_id: request.requestId };
   });
 
+  const calculateFinalPortfoliosAndLeaderboard = async (eventId: string) => {
+    // 1. Fetch all participants with their portfolios
+    const users = await app.db
+      .select({
+        userId: schema.users.id,
+        publicId: schema.users.publicId,
+        participantId: schema.users.participantId,
+        displayName: schema.users.displayName,
+        portfolioId: schema.portfolios.id,
+        startingCapital: schema.portfolios.startingCapital,
+        availableCash: schema.portfolios.availableCash,
+        reservedCash: schema.portfolios.reservedCash,
+        realizedPnl: schema.portfolios.realizedPnl,
+      })
+      .from(schema.users)
+      .innerJoin(schema.portfolios, eq(schema.users.id, schema.portfolios.userId))
+      .where(eq(schema.users.role, 'PARTICIPANT'));
+
+    // 2. Fetch all open positions with instrument info
+    const allPositions = await app.db
+      .select({
+        userId: schema.positions.userId,
+        symbol: schema.instruments.symbol,
+        side: schema.positions.side,
+        quantity: schema.positions.quantity,
+        averageEntryPrice: schema.positions.averageEntryPrice,
+      })
+      .from(schema.positions)
+      .innerJoin(schema.instruments, eq(schema.positions.instrumentId, schema.instruments.id))
+      .where(eq(schema.positions.eventId, eventId));
+
+    const positionsByUser = new Map<string, typeof allPositions>();
+    for (const pos of allPositions) {
+      const existing = positionsByUser.get(pos.userId) || [];
+      existing.push(pos);
+      positionsByUser.set(pos.userId, existing);
+    }
+
+    // 3. Count filled orders per user
+    const tradeCounts = await app.db
+      .select({
+        userId: schema.orders.userId,
+        count: count(),
+      })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.eventId, eventId),
+          eq(schema.orders.status, 'FILLED')
+        )
+      )
+      .groupBy(schema.orders.userId);
+
+    const tradesMap = new Map<string, number>();
+    for (const tc of tradeCounts) {
+      tradesMap.set(tc.userId, Number(tc.count));
+    }
+
+    // 4. Compute mark-to-market equity and PnL for each user
+    const entries = [];
+    for (const user of users) {
+      const startCap = new Decimal(user.startingCapital || '1000000');
+      const availCash = new Decimal(user.availableCash || '1000000');
+      const reserved = new Decimal(user.reservedCash || '0');
+      const realizedPnl = new Decimal(user.realizedPnl || '0');
+
+      let unrealizedPnl = new Decimal(0);
+      let marketValue = new Decimal(0);
+      const userPositions = positionsByUser.get(user.userId) || [];
+
+      for (const pos of userPositions) {
+        if (pos.quantity > 0 && pos.side && pos.averageEntryPrice) {
+          const cached = livePriceCache.getBySymbol(pos.symbol);
+          const curPrice = cached ? cached.price : new Decimal(pos.averageEntryPrice);
+          const avgPrice = new Decimal(pos.averageEntryPrice);
+          const qty = new Decimal(pos.quantity);
+
+          if (pos.side === 'LONG') {
+            marketValue = marketValue.plus(curPrice.times(qty));
+            unrealizedPnl = unrealizedPnl.plus(curPrice.minus(avgPrice).times(qty));
+          } else if (pos.side === 'SHORT') {
+            const invested = avgPrice.times(qty);
+            const unPnl = avgPrice.minus(curPrice).times(qty);
+            marketValue = marketValue.plus(invested.plus(unPnl));
+            unrealizedPnl = unrealizedPnl.plus(unPnl);
+          }
+        }
+      }
+
+      const totalPnl = realizedPnl.plus(unrealizedPnl);
+      const equity = startCap.plus(totalPnl);
+      const returnPct = startCap.isZero() ? new Decimal(0) : totalPnl.dividedBy(startCap).times(100);
+
+      // Persist final dailyPnl and updated timestamp to portfolios table
+      if (user.portfolioId) {
+        await app.db
+          .update(schema.portfolios)
+          .set({
+            dailyPnl: totalPnl.toFixed(2),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.portfolios.id, user.portfolioId));
+      }
+
+      entries.push({
+        rank: 0,
+        user_id: user.publicId,
+        participant_id: user.participantId,
+        display_name: user.displayName,
+        starting_capital: startCap.toFixed(2),
+        portfolio_value: equity.toFixed(2),
+        equity: equity.toFixed(2),
+        total_pnl: totalPnl.toFixed(2),
+        return_percent: returnPct.toFixed(2),
+        trades_count: tradesMap.get(user.userId) || 0,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    // Sort by equity descending and assign ranks
+    entries.sort((a, b) => new Decimal(b.equity).minus(new Decimal(a.equity)).toNumber());
+    return entries.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
+  };
+
   app.post('/event/end', async (request) => {
     const [event] = await app.db
       .select()
@@ -237,15 +363,232 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       .set({ status: 'STOPPED', marketStatus: 'CLOSED', dayStatus: 'CLOSED', updatedAt: new Date() })
       .where(eq(schema.simulationStates.eventId, event.id));
 
-    await broadcastLifecycleAlert('CRITICAL', '🛑 Market Closed', 'The trading event has officially ended. All market operations are closed.', request.user?.userId);
+    // Calculate final portfolios of all users including open positions mark-to-market
+    const rankedEntries = await calculateFinalPortfoliosAndLeaderboard(event.id);
+    const top10 = rankedEntries.slice(0, 10);
+
+    // Save final leaderboard snapshot
+    const [lastSnapshot] = await app.db
+      .select({ version: schema.leaderboardSnapshots.version })
+      .from(schema.leaderboardSnapshots)
+      .where(eq(schema.leaderboardSnapshots.eventId, event.id))
+      .orderBy(desc(schema.leaderboardSnapshots.version))
+      .limit(1);
+    const nextVersion = (lastSnapshot?.version || 0) + 1;
+
+    await app.db.insert(schema.leaderboardSnapshots).values({
+      eventId: event.id,
+      version: nextVersion,
+      simulationDay: 1,
+      snapshot: rankedEntries,
+      asOf: new Date(),
+    });
+
+    await broadcastLifecycleAlert('CRITICAL', '🛑 Market Closed - Event Ended', 'The trading event has officially ended. All user portfolios settled.', request.user?.userId);
     if (app.wsGateway) {
-      app.wsGateway.broadcast('market_status', { status: 'CLOSED', event_status: 'ENDED' });
+      // Broadcast to participants to immediately trigger thank you / black screen
+      app.wsGateway.broadcast('market_status', {
+        status: 'CLOSED',
+        event_status: 'ENDED',
+        message: 'The trading event has officially ended. Thank you for participating!',
+      });
+      app.wsGateway.broadcast('event', {
+        event_id: event.id,
+        status: 'ENDED',
+      });
     }
 
-    return { data: { status: 'ENDED' }, request_id: request.requestId };
+    return {
+      data: {
+        status: 'ENDED',
+        top_10: top10,
+        total_participants: rankedEntries.length,
+      },
+      request_id: request.requestId,
+    };
   });
 
-  // Simulation Controls
+  // Reset Trades & Portfolios
+  app.post('/trades/reset', async (request) => {
+    // 1. Truncate trading activity tables
+    await app.db.execute(sql`
+      TRUNCATE TABLE executions CASCADE;
+      TRUNCATE TABLE orders CASCADE;
+      TRUNCATE TABLE portfolio_ledger_entries CASCADE;
+      TRUNCATE TABLE idempotency_records CASCADE;
+      TRUNCATE TABLE audit_logs CASCADE;
+      TRUNCATE TABLE news CASCADE;
+      TRUNCATE TABLE leaderboard_snapshots CASCADE;
+      TRUNCATE TABLE positions CASCADE;
+    `);
+
+    // 2. Reset all participant portfolios to initial state (₹10,00,000.00)
+    await app.db.execute(sql`
+      UPDATE portfolios
+      SET available_cash = starting_capital,
+          reserved_cash = '0',
+          realized_pnl = '0',
+          daily_pnl = '0',
+          updated_at = NOW();
+    `);
+
+    // 3. Reset simulation cursor to Day 1 Interval 0 / PRE_OPEN
+    await app.db.execute(sql`
+      UPDATE simulation_states
+      SET status = 'STOPPED',
+          day_status = 'PRE_OPEN',
+          market_status = 'PRE_OPEN',
+          simulation_day = 1,
+          interval_index = 0,
+          simulated_at = NULL,
+          last_committed_at = NULL,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          updated_at = NOW();
+    `);
+
+    // 4. Reset active events to SETUP
+    await app.db.execute(sql`
+      UPDATE events
+      SET status = 'SETUP',
+          ended_at = NULL,
+          updated_at = NOW();
+    `);
+
+    // 5. Broadcast market status and push reset portfolio state to all connected users
+    if (app.wsGateway) {
+      app.wsGateway.broadcast('market_status', { status: 'PRE_OPEN', event_status: 'SETUP' });
+
+      const allPortfolios = await app.db.select().from(schema.portfolios);
+      for (const p of allPortfolios) {
+        const startCap = new Decimal(p.startingCapital || '1000000');
+        app.wsGateway.sendToUser(p.userId, 'portfolio', {
+          cash: startCap.toFixed(2),
+          available_cash: startCap.toFixed(2),
+          cash_balance: startCap.toFixed(2),
+          reserved_cash: '0.00',
+          invested_amount: '0.00',
+          investedValue: 0,
+          market_value: '0.00',
+          realized_pnl: '0.00',
+          unrealized_pnl: '0.00',
+          daily_pnl: '0.00',
+          total_pnl: '0.00',
+          total_pnl_percent: '0.00',
+          equity: startCap.toFixed(2),
+          portfolioValue: startCap.toNumber(),
+          starting_capital: startCap.toFixed(2),
+          currentBalance: startCap.toNumber(),
+          availableCash: startCap.toNumber(),
+          totalPnl: 0,
+          totalPnlPct: 0,
+          todayPnl: 0,
+          todayPnlPct: 0,
+          cashBalance: startCap.toNumber(),
+          availableMargin: startCap.toNumber(),
+          usedMargin: 0,
+          realizedPnl: 0,
+          unrealizedPnl: 0,
+          equityVal: startCap.toNumber(),
+        });
+        app.wsGateway.sendToUser(p.userId, 'positions', []);
+        app.wsGateway.sendToUser(p.userId, 'orders', []);
+      }
+    }
+
+    await broadcastLifecycleAlert(
+      'WARNING',
+      '🔄 System Reset',
+      'All trade logs, orders, and participant portfolios have been reset by administrator.',
+      request.user?.userId
+    );
+
+    return {
+      data: {
+        message: 'All trade logs, orders, executions, and positions cleared. Portfolios reset to initial cash.',
+      },
+      request_id: request.requestId,
+    };
+  });
+
+  // Simulation Controls: Close Day manually
+  app.post('/simulation/close-day', async (request) => {
+    const [event] = await app.db
+      .select()
+      .from(schema.events)
+      .orderBy(desc(schema.events.createdAt))
+      .limit(1);
+
+    if (!event) throw new AppError('NOT_FOUND', 404, 'No event found.');
+
+    const [simState] = await app.db
+      .select()
+      .from(schema.simulationStates)
+      .where(eq(schema.simulationStates.eventId, event.id))
+      .limit(1);
+
+    const currentDay = simState?.simulationDay || 1;
+
+    await app.db
+      .update(schema.simulationStates)
+      .set({
+        dayStatus: 'CLOSED',
+        marketStatus: 'CLOSED',
+        intervalIndex: 71,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.simulationStates.eventId, event.id));
+
+    // Save leaderboard snapshot for the closed day
+    try {
+      const rankedEntries = await calculateFinalPortfoliosAndLeaderboard(event.id);
+      const [lastSnapshot] = await app.db
+        .select({ version: schema.leaderboardSnapshots.version })
+        .from(schema.leaderboardSnapshots)
+        .where(eq(schema.leaderboardSnapshots.eventId, event.id))
+        .orderBy(desc(schema.leaderboardSnapshots.version))
+        .limit(1);
+
+      const nextVersion = (lastSnapshot?.version || 0) + 1;
+      await app.db.insert(schema.leaderboardSnapshots).values({
+        eventId: event.id,
+        version: nextVersion,
+        simulationDay: currentDay,
+        snapshot: rankedEntries,
+        asOf: new Date(),
+      });
+    } catch (e) {
+      app.log.error(e, 'Failed to compute snapshot on close-day');
+    }
+
+    await broadcastLifecycleAlert(
+      'CRITICAL',
+      `🔔 Trading Day ${currentDay} Concluded`,
+      `Trading Day ${currentDay} has been manually closed by Administrator. Waiting for next day session.`,
+      request.user?.userId
+    );
+
+    if (app.wsGateway) {
+      app.wsGateway.broadcast('market_status', {
+        status: 'CLOSED',
+        day_status: 'CLOSED',
+        event_status: 'RUNNING',
+        simulation_day: currentDay,
+      });
+    }
+
+    return {
+      data: {
+        simulation_day: currentDay,
+        interval_index: 71,
+        day_status: 'CLOSED',
+        market_status: 'CLOSED',
+      },
+      request_id: request.requestId,
+    };
+  });
+
+  // Simulation Controls: Next Day or Jump to Specific Day
   app.post('/simulation/next-day', async (request) => {
     const [event] = await app.db
       .select()
@@ -261,27 +604,112 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       .where(eq(schema.simulationStates.eventId, event.id))
       .limit(1);
 
-    const nextDay = (simState?.simulationDay || 0) + 1;
+    const body = (request.body as { day?: number }) || {};
+    const totalDays = event.totalSimulationDays || 20;
+    let targetDay: number;
+    if (typeof body.day === 'number' && body.day >= 1) {
+      targetDay = Math.min(body.day, totalDays);
+    } else {
+      targetDay = Math.min((simState?.simulationDay || 0) + 1, totalDays);
+    }
 
     await app.db
       .update(schema.simulationStates)
       .set({
-        simulationDay: nextDay,
+        simulationDay: targetDay,
         intervalIndex: 0,
+        status: 'RUNNING',
         dayStatus: 'OPEN',
         marketStatus: 'OPEN',
         updatedAt: new Date(),
       })
       .where(eq(schema.simulationStates.eventId, event.id));
 
-    await broadcastLifecycleAlert('EVENT_UPDATE', `🌅 Trading Day ${nextDay} Opened`, `Welcome to Day ${nextDay} of the trading ring! Today's session is now LIVE.`, request.user?.userId);
+    if (event.status !== 'RUNNING') {
+      await app.db
+        .update(schema.events)
+        .set({ status: 'RUNNING', updatedAt: new Date() })
+        .where(eq(schema.events.id, event.id));
+    }
+
+    await broadcastLifecycleAlert(
+      'EVENT_UPDATE',
+      `🌅 Trading Day ${targetDay} Opened`,
+      `Welcome to Day ${targetDay} of the trading ring! Today's session is now LIVE.`,
+      request.user?.userId
+    );
+
     if (app.wsGateway) {
-      app.wsGateway.broadcast('market_status', { status: 'OPEN', event_status: 'RUNNING', simulation_day: nextDay });
+      app.wsGateway.broadcast('market_status', {
+        status: 'OPEN',
+        day_status: 'OPEN',
+        event_status: 'RUNNING',
+        simulation_day: targetDay,
+      });
     }
 
     return {
       data: {
-        simulation_day: nextDay,
+        simulation_day: targetDay,
+        interval_index: 0,
+        day_status: 'OPEN',
+        market_status: 'OPEN',
+      },
+      request_id: request.requestId,
+    };
+  });
+
+  app.post('/simulation/set-day', async (request) => {
+    const [event] = await app.db
+      .select()
+      .from(schema.events)
+      .orderBy(desc(schema.events.createdAt))
+      .limit(1);
+
+    if (!event) throw new AppError('NOT_FOUND', 404, 'No event found.');
+
+    const body = (request.body as { day?: number }) || {};
+    const totalDays = event.totalSimulationDays || 20;
+    const targetDay = Math.max(1, Math.min(body.day || 1, totalDays));
+
+    await app.db
+      .update(schema.simulationStates)
+      .set({
+        simulationDay: targetDay,
+        intervalIndex: 0,
+        status: 'RUNNING',
+        dayStatus: 'OPEN',
+        marketStatus: 'OPEN',
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.simulationStates.eventId, event.id));
+
+    if (event.status !== 'RUNNING') {
+      await app.db
+        .update(schema.events)
+        .set({ status: 'RUNNING', updatedAt: new Date() })
+        .where(eq(schema.events.id, event.id));
+    }
+
+    await broadcastLifecycleAlert(
+      'EVENT_UPDATE',
+      `🌅 Jumped to Trading Day ${targetDay}`,
+      `Exchange has moved the simulation to Day ${targetDay}. Trading session is now LIVE.`,
+      request.user?.userId
+    );
+
+    if (app.wsGateway) {
+      app.wsGateway.broadcast('market_status', {
+        status: 'OPEN',
+        day_status: 'OPEN',
+        event_status: 'RUNNING',
+        simulation_day: targetDay,
+      });
+    }
+
+    return {
+      data: {
+        simulation_day: targetDay,
         interval_index: 0,
         day_status: 'OPEN',
         market_status: 'OPEN',
@@ -559,43 +987,61 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  // Leaderboard Monitor
+  // Leaderboard Monitor (Admin Only)
   app.get('/leaderboard', async (request) => {
-    const users = await app.db
-      .select({
-        user: schema.users,
-        portfolio: schema.portfolios,
-      })
-      .from(schema.users)
-      .leftJoin(schema.portfolios, eq(schema.users.id, schema.portfolios.userId))
-      .where(eq(schema.users.role, 'PARTICIPANT'));
+    const [event] = await app.db
+      .select()
+      .from(schema.events)
+      .orderBy(desc(schema.events.createdAt))
+      .limit(1);
 
-    const entries = users.map(({ user, portfolio }, idx) => {
-      const realized = parseFloat(portfolio?.realizedPnl || '0');
-      const startCap = parseFloat(portfolio?.startingCapital || '1000000');
-      const avail = parseFloat(portfolio?.availableCash || '1000000');
-      const reserved = parseFloat(portfolio?.reservedCash || '0');
-      const equity = avail + reserved;
-      const totalPnl = realized;
-      const returnPct = startCap > 0 ? (totalPnl / startCap) * 100 : 0;
-
+    if (!event) {
       return {
-        rank: idx + 1,
-        participant_id: user.participantId,
-        display_name: user.displayName,
-        portfolio_value: equity.toFixed(2),
-        total_pnl: totalPnl.toFixed(2),
-        return_percent: returnPct.toFixed(2),
-        updated_at: portfolio?.updatedAt ? portfolio.updatedAt.toISOString() : new Date().toISOString(),
+        data: {
+          entries: [],
+          top_10: [],
+          total_participants: 0,
+          as_of: new Date().toISOString(),
+          version: 1,
+          is_event_ended: false,
+        },
+        request_id: request.requestId,
       };
-    });
+    }
+
+    let entries: any[] = [];
+    let version = 1;
+
+    // If event is ENDED, check if a finalized snapshot is available
+    if (event.status === 'ENDED') {
+      const [latestSnapshot] = await app.db
+        .select()
+        .from(schema.leaderboardSnapshots)
+        .where(eq(schema.leaderboardSnapshots.eventId, event.id))
+        .orderBy(desc(schema.leaderboardSnapshots.version))
+        .limit(1);
+
+      if (latestSnapshot?.snapshot) {
+        entries = latestSnapshot.snapshot as any[];
+        version = latestSnapshot.version;
+      }
+    }
+
+    // If no snapshot exists yet or event is active, compute live with open positions
+    if (entries.length === 0) {
+      entries = await calculateFinalPortfoliosAndLeaderboard(event.id);
+    }
+
+    const top10 = entries.slice(0, 10);
 
     return {
       data: {
         entries,
+        top_10: top10,
         total_participants: entries.length,
         as_of: new Date().toISOString(),
-        version: 1,
+        version,
+        is_event_ended: event.status === 'ENDED',
       },
       request_id: request.requestId,
     };

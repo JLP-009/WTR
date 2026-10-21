@@ -208,8 +208,9 @@ export class OrderService {
             const pnl = currentAvgPrice.minus(executionPrice).times(targetQuantity);
             realizedPnl = realizedPnl.plus(pnl);
             positionRealizedPnl = positionRealizedPnl.plus(pnl);
-            // Cash credited with return of margin + P&L
-            availableCash = availableCash.plus(executionPrice.times(targetQuantity)).plus(pnl);
+            // Cash credited with return of original margin (currentAvgPrice * qty) + P&L
+            const returnedMargin = currentAvgPrice.times(targetQuantity);
+            availableCash = availableCash.plus(returnedMargin).plus(pnl);
             newPosQty = currentPosQty - targetQuantity;
             if (newPosQty === 0) {
               newPosSide = null;
@@ -222,7 +223,8 @@ export class OrderService {
             const pnl = currentAvgPrice.minus(executionPrice).times(closeQty);
             realizedPnl = realizedPnl.plus(pnl);
             positionRealizedPnl = positionRealizedPnl.plus(pnl);
-            availableCash = availableCash.plus(executionPrice.times(closeQty)).plus(pnl);
+            const returnedMargin = currentAvgPrice.times(closeQty);
+            availableCash = availableCash.plus(returnedMargin).plus(pnl);
 
             const longCost = executionPrice.times(longQty);
             if (availableCash.lessThan(longCost)) {

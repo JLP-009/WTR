@@ -6,7 +6,7 @@ const environmentSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(32),
-  JWT_EXPIRY: z.string().min(1).default('15m'),
+  JWT_EXPIRY: z.string().min(1).default('24h'),
   CORS_ORIGIN: z.string().url(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   WS_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(30000),

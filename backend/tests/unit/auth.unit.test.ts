@@ -41,7 +41,7 @@ describe('Auth Unit Tests', () => {
 
     const { token, expiresInSeconds } = await signAccessToken(payload, testEnv);
     expect(typeof token).toBe('string');
-    expect(expiresInSeconds).toBe(900);
+    expect(expiresInSeconds).toBe(86400); // 24 hours (full trading day)
 
     const verified = await verifyAccessToken(token, testEnv);
     expect(verified.userId).toBe(payload.userId);

@@ -6,7 +6,7 @@ import { AppError } from '../../common/errors/app-error.js';
 import { verifyPassword, hashPassword } from '../../common/auth/password.js';
 import { signAccessToken, generateRefreshToken, hashRefreshToken, type TokenPayload } from '../../common/auth/jwt.js';
 import type { Environment } from '../../config/env.js';
-import type { LoginRequest, LoginResponseData, RefreshResponseData, RegisterRequest, ResetPasswordRequest } from './auth.types.js';
+import type { LoginRequest, LoginResponseData, RefreshResponseData, RegisterRequest, ResetPasswordRequest, ChangePasswordRequest } from './auth.types.js';
 
 export class AuthService {
   public constructor(private readonly db: Database, private readonly env: Environment) {}
@@ -20,24 +20,37 @@ export class AuthService {
       .limit(1);
 
     if (existing) {
-      throw new AppError('PARTICIPANT_ID_EXISTS', 409, `Participant ID '${cleanParticipantId}' is already in use. Please choose another ID or login.`);
+      throw new AppError('PARTICIPANT_ID_EXISTS', 409, `This ID '${cleanParticipantId}' already exists. Please select another user ID.`);
+    }
+
+    if (cleanParticipantId.startsWith('ADMIN')) {
+      throw new AppError('RESERVED_ID', 400, 'Participant IDs starting with ADMIN are reserved for system administrators. Please select another user ID.');
     }
 
     const passwordHash = await hashPassword(req.password);
     const displayName = `${req.first_name.trim()} ${req.last_name.trim()}`;
     const publicId = `usr_${crypto.randomUUID().replace(/-/g, '')}`;
 
-    const [newUser] = await this.db
-      .insert(schema.users)
-      .values({
-        publicId,
-        participantId: cleanParticipantId,
-        displayName,
-        passwordHash,
-        role: 'PARTICIPANT',
-        accountStatus: 'ACTIVE',
-      })
-      .returning();
+    let newUser;
+    try {
+      [newUser] = await this.db
+        .insert(schema.users)
+        .values({
+          publicId,
+          participantId: cleanParticipantId,
+          displayName,
+          passwordHash,
+          registeredDeviceId: req.device_id || null,
+          role: 'PARTICIPANT',
+          accountStatus: 'ACTIVE',
+        })
+        .returning();
+    } catch (dbErr: any) {
+      if (dbErr?.code === '23505' || dbErr?.message?.includes('users_participant_id_unique')) {
+        throw new AppError('PARTICIPANT_ID_EXISTS', 409, `This ID '${cleanParticipantId}' already exists. Please select another user ID.`);
+      }
+      throw dbErr;
+    }
 
     // Automatically link to active trading event and initialize portfolio with starting capital
     const [activeEvent] = await this.db
@@ -113,6 +126,21 @@ export class AuthService {
       throw new AppError('NOT_FOUND', 404, `No account found with Participant ID '${cleanParticipantId}'.`);
     }
 
+    if (user.role === 'ADMIN') {
+      throw new AppError('FORBIDDEN', 403, 'Administrator credentials cannot be reset through the public recovery form. Please contact system operations.');
+    }
+
+    // Verify Device Fingerprint for participant account
+    if (user.role === 'PARTICIPANT' && user.registeredDeviceId && req.device_id) {
+      if (user.registeredDeviceId !== req.device_id) {
+        throw new AppError(
+          'UNAUTHORIZED_DEVICE',
+          403,
+          'Access Denied: Password reset is only permitted from the phone/device on which this account was registered.'
+        );
+      }
+    }
+
     // Verify first or last name matches display name for identity verification
     const actualName = user.displayName.trim().toLowerCase();
     const fName = req.first_name.trim().toLowerCase();
@@ -145,11 +173,63 @@ export class AuthService {
     };
   }
 
-  public async login(req: LoginRequest): Promise<LoginResponseData> {
+  public async changePassword(userId: string, req: ChangePasswordRequest): Promise<{ success: boolean; message: string }> {
     const [user] = await this.db
       .select()
       .from(schema.users)
-      .where(eq(schema.users.participantId, req.participant_id))
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!user) {
+      throw new AppError('NOT_FOUND', 404, 'User account not found.');
+    }
+
+    const isMatch = await verifyPassword(req.current_password, user.passwordHash);
+    if (!isMatch) {
+      throw new AppError('INVALID_CREDENTIALS', 400, 'The current password you entered is incorrect.');
+    }
+
+    const newPasswordHash = await hashPassword(req.new_password);
+    await this.db
+      .update(schema.users)
+      .set({
+        passwordHash: newPasswordHash,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, user.id));
+
+    return {
+      success: true,
+      message: 'Password changed successfully.',
+    };
+  }
+
+  public async isParticipantIdAvailable(rawId: string): Promise<{ available: boolean; reason?: string }> {
+    const cleanId = rawId.trim().toUpperCase();
+    if (!cleanId) {
+      return { available: false, reason: 'Please enter a valid User ID' };
+    }
+    if (cleanId.startsWith('ADMIN')) {
+      return { available: false, reason: 'IDs starting with ADMIN are reserved. Please select another user ID.' };
+    }
+    const [existing] = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.participantId, cleanId))
+      .limit(1);
+
+    if (existing) {
+      return { available: false, reason: `This ID '${cleanId}' already exists. Please select another user ID.` };
+    }
+    return { available: true };
+  }
+
+  public async login(req: LoginRequest): Promise<LoginResponseData> {
+    const cleanParticipantId = req.participant_id.trim().toUpperCase();
+    const [user] = await this.db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.participantId, cleanParticipantId))
       .limit(1);
 
     if (!user) {
@@ -163,6 +243,25 @@ export class AuthService {
     const isValidPassword = await verifyPassword(user.passwordHash, req.password);
     if (!isValidPassword) {
       throw new AppError('AUTHENTICATION_FAILED', 401, 'Invalid participant ID or password.');
+    }
+
+    // Device Fingerprinting & Binding Check for participants (Admin is exempt)
+    if (user.role === 'PARTICIPANT' && req.device_id) {
+      if (user.registeredDeviceId) {
+        if (user.registeredDeviceId !== req.device_id) {
+          throw new AppError(
+            'UNAUTHORIZED_DEVICE',
+            403,
+            'Access Denied: This account is locked to another phone/device. Logins from unauthorized devices are blocked.'
+          );
+        }
+      } else {
+        // Automatically bind this first successful login device to the account
+        await this.db
+          .update(schema.users)
+          .set({ registeredDeviceId: req.device_id, updatedAt: new Date() })
+          .where(eq(schema.users.id, user.id));
+      }
     }
 
     const tokenPayload: TokenPayload = {

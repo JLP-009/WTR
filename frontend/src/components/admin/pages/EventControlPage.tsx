@@ -248,9 +248,9 @@ export default function EventControlPage() {
         open={dialog === 'end'}
         onClose={() => setDialog(null)}
         onConfirm={() => runAction('end')}
-        title="End Event?"
-        description="This is a terminal action and cannot be undone. The event will be permanently ended, the leaderboard will be finalized, and no further trading will be possible."
-        confirmLabel="End Event Permanently"
+        title="End Event & Finalize Portfolios?"
+        description="This is a terminal action and cannot be undone. Ending the event will calculate final portfolios for all participants (valuing open positions mark-to-market), generate the official Top 10 Leaderboard for Admin only, and display the Thank You completion screen to all participants."
+        confirmLabel="End Event & Finalize"
         cancelLabel="Keep Running"
         destructive
         loading={actionLoading}

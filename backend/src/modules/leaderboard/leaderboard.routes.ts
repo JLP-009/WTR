@@ -18,11 +18,10 @@ export interface LeaderboardEntry {
 
 export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
   /**
-   * Serve leaderboard from the latest snapshot (computed at day close).
-   * Falls back to a lightweight live computation if no snapshot exists yet.
+   * Serve leaderboard: live computation when event is RUNNING (so trades update live),
+   * or from the latest snapshot if event is ended / paused.
    */
   const getLeaderboardData = async (): Promise<LeaderboardEntry[]> => {
-    // 1. Try to serve from snapshot first (computed at day close — O(1) read)
     const [activeEvent] = await app.db
       .select()
       .from(schema.events)
@@ -31,19 +30,21 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
 
     if (!activeEvent) return [];
 
-    const [latestSnapshot] = await app.db
-      .select()
-      .from(schema.leaderboardSnapshots)
-      .where(eq(schema.leaderboardSnapshots.eventId, activeEvent.id))
-      .orderBy(desc(schema.leaderboardSnapshots.version))
-      .limit(1);
+    // If event is not running and we have a snapshot, serve it (O(1) read)
+    if (activeEvent.status !== 'RUNNING') {
+      const [latestSnapshot] = await app.db
+        .select()
+        .from(schema.leaderboardSnapshots)
+        .where(eq(schema.leaderboardSnapshots.eventId, activeEvent.id))
+        .orderBy(desc(schema.leaderboardSnapshots.version))
+        .limit(1);
 
-    if (latestSnapshot?.snapshot) {
-      return latestSnapshot.snapshot as LeaderboardEntry[];
+      if (latestSnapshot?.snapshot) {
+        return latestSnapshot.snapshot as LeaderboardEntry[];
+      }
     }
 
-    // 2. No snapshot yet (first day, before first close) — compute lightweight live version
-    // Uses batch queries (2 queries total) instead of per-user loops
+    // Live computation for active trading (batch queries, sub-10ms for 300 users)
     const users = await app.db
       .select({
         userId: schema.users.id,
@@ -120,14 +121,16 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
             marketValue = marketValue.plus(curPrice.times(qty));
             unrealizedPnl = unrealizedPnl.plus(curPrice.minus(avgPrice).times(qty));
           } else if (pos.side === 'SHORT') {
-            marketValue = marketValue.plus(avgPrice.times(qty));
-            unrealizedPnl = unrealizedPnl.plus(avgPrice.minus(curPrice).times(qty));
+            const invested = avgPrice.times(qty);
+            const unPnl = avgPrice.minus(curPrice).times(qty);
+            marketValue = marketValue.plus(invested.plus(unPnl));
+            unrealizedPnl = unrealizedPnl.plus(unPnl);
           }
         }
       }
 
-      const equity = availCash.plus(reserved).plus(marketValue);
       const totalPnl = realizedPnl.plus(unrealizedPnl);
+      const equity = startCap.plus(totalPnl);
       const totalPnlPct = startCap.isZero() ? new Decimal(0) : totalPnl.dividedBy(startCap).times(100);
 
       return {
@@ -149,11 +152,32 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
   };
 
   app.get('/', { preHandler: [app.optionalAuthenticate] }, async (request) => {
+    const [activeEvent] = await app.db
+      .select()
+      .from(schema.events)
+      .orderBy(desc(schema.events.createdAt))
+      .limit(1);
+
+    // Leaderboard is hidden from non-admin participants when event is ended
+    if (activeEvent?.status === 'ENDED' && request.user?.role !== 'ADMIN') {
+      return { data: [], request_id: request.requestId, message: 'Trading event has ended. Leaderboard is restricted to event administrators.' };
+    }
+
     const data = await getLeaderboardData();
     return { data, request_id: request.requestId };
   });
 
   app.get('/me', { preHandler: [app.authenticate] }, async (request) => {
+    const [activeEvent] = await app.db
+      .select()
+      .from(schema.events)
+      .orderBy(desc(schema.events.createdAt))
+      .limit(1);
+
+    if (activeEvent?.status === 'ENDED' && request.user?.role !== 'ADMIN') {
+      return { data: null, request_id: request.requestId, message: 'Trading event has ended.' };
+    }
+
     const list = await getLeaderboardData();
     const myEntry = list.find((e) => e.participant_id === request.user!.participantId);
     return {

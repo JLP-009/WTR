@@ -14,3 +14,16 @@ export interface OrderResponse {
   message: string;
   executedPrice?: number;
 }
+
+export interface TradeHistoryItem {
+  order_id: string;
+  client_order_id?: string;
+  symbol: string;
+  side: 'BUY' | 'SELL' | 'CLOSE';
+  quantity: number;
+  filled_quantity: number;
+  status: string;
+  average_price: string | null;
+  created_at: string;
+  updated_at?: string;
+}

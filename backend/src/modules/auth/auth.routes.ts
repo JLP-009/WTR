@@ -1,8 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { loginRequestSchema, refreshRequestSchema, registerRequestSchema, resetPasswordRequestSchema } from './auth.types.js';
+import { loginRequestSchema, refreshRequestSchema, registerRequestSchema, resetPasswordRequestSchema, changePasswordRequestSchema } from './auth.types.js';
 import { AppError } from '../../common/errors/app-error.js';
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
+  app.get('/check-id/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const data = await app.authService.isParticipantIdAvailable(id);
+    return { data, request_id: request.requestId };
+  });
+
   app.post('/register', async (request) => {
     const parsed = registerRequestSchema.parse(request.body);
     const data = await app.authService.register(parsed);
@@ -18,6 +24,12 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   app.post('/reset-password', async (request) => {
     const parsed = resetPasswordRequestSchema.parse(request.body);
     const data = await app.authService.resetPassword(parsed);
+    return { data, request_id: request.requestId };
+  });
+
+  app.post('/change-password', { preHandler: [app.authenticate] }, async (request) => {
+    const parsed = changePasswordRequestSchema.parse(request.body);
+    const data = await app.authService.changePassword(request.user!.userId, parsed);
     return { data, request_id: request.requestId };
   });
 

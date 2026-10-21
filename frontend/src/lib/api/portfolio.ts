@@ -62,11 +62,11 @@ export function normalizePortfolioSummary(data: any): PortfolioSummary {
 
   const currentBalance = typeof data.currentBalance === 'number'
     ? data.currentBalance
-    : parseFloat(data.cash ?? data.available_cash ?? data.currentBalance ?? '1000000');
+    : parseFloat(data.cash ?? data.available_cash ?? data.cash_balance ?? data.cashBalance ?? data.currentBalance ?? '1000000');
 
   const availableCash = typeof data.availableCash === 'number'
     ? data.availableCash
-    : parseFloat(data.available_cash ?? data.availableCash ?? '1000000');
+    : parseFloat(data.available_cash ?? data.cash ?? data.cash_balance ?? data.availableCash ?? '1000000');
 
   const investedValue = typeof data.investedValue === 'number'
     ? data.investedValue

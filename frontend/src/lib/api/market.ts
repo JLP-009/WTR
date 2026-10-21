@@ -26,8 +26,8 @@ interface BackendCandleResponse {
   trading_day: number;
 }
 
-export async function getMarketState(symbol: string = 'NIFTY'): Promise<MarketState> {
-  const cleanSymbol = symbol.replace(/\s+/g, '').toUpperCase();
+export async function getMarketState(symbol: string = 'NIFTY_50'): Promise<MarketState> {
+  const cleanSymbol = symbol.replace(/\s+/g, '_').toUpperCase();
   try {
     const quote = await api.get<BackendQuoteResponse>(`/market/quote/${cleanSymbol}`);
     return {
@@ -43,8 +43,8 @@ export async function getMarketState(symbol: string = 'NIFTY'): Promise<MarketSt
   }
 }
 
-export async function getMarketData(symbol: string = 'NIFTY', timeframe: Timeframe = '1m'): Promise<MarketDataResponse> {
-  const cleanSymbol = symbol.replace(/\s+/g, '').toUpperCase();
+export async function getMarketData(symbol: string = 'NIFTY_50', timeframe: Timeframe = '1m'): Promise<MarketDataResponse> {
+  const cleanSymbol = symbol.replace(/\s+/g, '_').toUpperCase();
   try {
     const candles = await api.get<BackendCandleResponse[]>(`/market/candles/${cleanSymbol}`);
     const mappedCandles: Candle[] = candles.map((c) => ({
@@ -64,5 +64,33 @@ export async function getMarketData(symbol: string = 'NIFTY', timeframe: Timefra
   } catch (err) {
     console.error(`[Market] Failed to fetch candles for ${cleanSymbol}:`, err);
     throw err;
+  }
+}
+
+export interface MarketStatusResponse {
+  status: string;
+  server_time: string;
+  next_change_at: string | null;
+  message: string | null;
+  event_status: string;
+  simulation_day: number | null;
+  configured_total_simulation_days: number | null;
+  simulation_time: string | null;
+}
+
+export async function getMarketStatus(): Promise<MarketStatusResponse> {
+  try {
+    return await api.get<MarketStatusResponse>('/market/status');
+  } catch {
+    return {
+      status: 'CLOSED',
+      server_time: new Date().toISOString(),
+      next_change_at: null,
+      message: null,
+      event_status: 'RUNNING',
+      simulation_day: 1,
+      configured_total_simulation_days: 20,
+      simulation_time: '09:15:00',
+    };
   }
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Position } from '../../contracts/v1/positions';
 import { closePosition } from '../../lib/api/positions';
+import ConfirmDialog from '../common/ConfirmDialog';
 
 interface PositionCardProps {
   position: Position;
@@ -14,6 +15,7 @@ function fmt(n: number) {
 export default function PositionCard({ position, onClosed }: PositionCardProps) {
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState('');
+  const [showConfirm, setShowConfirm] = useState(false);
   const profit = (position.pnl ?? 0) >= 0;
 
   const handleClose = async () => {
@@ -21,7 +23,10 @@ export default function PositionCard({ position, onClosed }: PositionCardProps) 
     setCloseError('');
     try {
       const res = await closePosition({ positionId: position.id });
-      if (res.success) onClosed(position.id);
+      if (res.success) {
+        setShowConfirm(false);
+        onClosed(position.id);
+      }
     } catch (err: any) {
       setCloseError(err?.message || 'Failed to close position. Please try again.');
     } finally {
@@ -84,15 +89,27 @@ export default function PositionCard({ position, onClosed }: PositionCardProps) 
         <p className="text-xs text-[color:var(--danger)] mb-2 text-center">{closeError}</p>
       )}
 
-      {/* Close */}
+      {/* Close button triggers double confirmation */}
       <button
-        onClick={handleClose}
+        onClick={() => setShowConfirm(true)}
         disabled={closing}
         aria-label={`Close ${position.symbol} ${position.side} position (${closeLabel})`}
         className="w-full h-8 text-[11px] font-semibold tracking-wider uppercase rounded-lg border border-[color:var(--border-strong)] text-[color:var(--foreground-secondary)] hover:border-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)] transition-colors disabled:opacity-40"
       >
-        {closing ? 'Closing…' : `Close · ${closeLabel}`}
+        Close · {closeLabel}
       </button>
+
+      {/* Double Confirmation Modal */}
+      <ConfirmDialog
+        open={showConfirm}
+        onClose={() => setShowConfirm(false)}
+        onConfirm={handleClose}
+        title={`Close ${position.symbol} Position?`}
+        description={`Are you sure you want to close your ${position.side} position of ${position.quantity} shares of ${position.symbol} at current market price (₹${fmt(position.ltp ?? 0)})?`}
+        confirmLabel={closing ? 'Closing…' : `Confirm ${closeLabel}`}
+        destructive={true}
+        loading={closing}
+      />
     </div>
   );
 }

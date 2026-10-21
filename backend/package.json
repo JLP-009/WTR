@@ -24,7 +24,9 @@
     "seed:admin": "tsx src/db/seed/admin.ts",
     "seed:participant": "tsx src/db/seed/participant.ts",
     "seed:dataset": "tsx src/db/seed/dataset.ts",
-    "import:csv": "tsx scripts/import-csv.ts"
+    "import:csv": "tsx scripts/import-csv.ts",
+    "admin:set-credentials": "tsx scripts/set-admin-credentials.ts",
+    "db:clean-users": "tsx scripts/clean-users.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",

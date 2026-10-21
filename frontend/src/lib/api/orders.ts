@@ -1,6 +1,6 @@
 import { api } from './client';
 import { v4 as uuidv4 } from '../../utils/uuid';
-import type { OrderRequest, OrderResponse } from '../../contracts/v1/orders';
+import type { OrderRequest, OrderResponse, TradeHistoryItem } from '../../contracts/v1/orders';
 
 interface BackendOrderSubmitResponse {
   order_id: string;
@@ -11,6 +11,16 @@ interface BackendOrderSubmitResponse {
   filled_quantity: number;
   status: string;
   average_price: string | null;
+}
+
+export async function getOrders(limit = 100): Promise<TradeHistoryItem[]> {
+  try {
+    const data = await api.get<TradeHistoryItem[]>(`/orders?limit=${limit}`);
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.error('[Orders] Failed to fetch orders:', err);
+    return [];
+  }
 }
 
 export async function submitOrder(req: OrderRequest): Promise<OrderResponse> {

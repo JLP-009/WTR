@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Trophy, Bell, X, Info, AlertTriangle, Radio, Sparkles } from 'lucide-react';
+import { Trophy, Bell, X, Info, AlertTriangle, Radio, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import ClubLogo from '../branding/ClubLogo';
 import ThemeToggle from '../navigation/ThemeToggle';
 import type { Route } from '../../App';
@@ -37,6 +37,51 @@ function relTime(iso: string) {
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
 }
+
+/** Split long news body into readable bullet points / paragraphs. */
+function formatNewsBody(text: string): string[] {
+  if (!text) return [];
+  // First split on explicit newlines
+  const byNewline = text.split(/\n+/).filter(Boolean);
+  if (byNewline.length > 1) return byNewline;
+  // If it's one big blob, split on sentence boundaries (period followed by space + uppercase)
+  const sentences = text.split(/(?<=\.)\s+(?=[A-Z])/).filter(Boolean);
+  return sentences;
+}
+
+/** Collapsible news body with bullet-style formatting */
+function NewsCardBody({ body }: { body: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const lines = formatNewsBody(body);
+  const isLong = lines.length > 3;
+  const visible = expanded ? lines : lines.slice(0, 3);
+
+  return (
+    <div className="space-y-1.5">
+      <ul className="space-y-1">
+        {visible.map((line, i) => (
+          <li key={i} className="flex gap-2 text-xs text-[color:var(--foreground-secondary)] leading-relaxed min-w-0">
+            <span className="text-[color:var(--accent)] mt-1 shrink-0">•</span>
+            <span className="break-all min-w-0">{line.trim()}</span>
+          </li>
+        ))}
+      </ul>
+      {isLong && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1 text-[10px] font-semibold text-[color:var(--accent)] hover:text-[color:var(--accent-hover)] transition-colors pt-0.5"
+        >
+          {expanded ? (
+            <>Show less <ChevronUp size={12} /></>
+          ) : (
+            <>Read more ({lines.length - 3} more) <ChevronDown size={12} /></>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
 
 export default function Header({ onNavigate }: HeaderProps) {
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -154,8 +199,10 @@ export default function Header({ onNavigate }: HeaderProps) {
                   <h4 className="text-sm font-bold text-[color:var(--foreground)] leading-tight">
                     {activeToast.title}
                   </h4>
-                  <p className="text-xs text-[color:var(--foreground-secondary)] mt-1 line-clamp-3">
-                    {activeToast.body}
+                  <p className="text-xs text-[color:var(--foreground-secondary)] mt-1 line-clamp-2">
+                    {formatNewsBody(activeToast.body).slice(0, 2).map((s, i) => (
+                      <span key={i}>{i > 0 ? ' • ' : ''}{s.trim()}</span>
+                    ))}
                   </p>
                 </div>
                 <div className="flex items-center justify-end gap-2 mt-1">
@@ -199,7 +246,7 @@ export default function Header({ onNavigate }: HeaderProps) {
             </div>
 
             {/* Notifications List */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-3">
               {news.length === 0 ? (
                 <div className="text-center py-12 text-[color:var(--foreground-muted)] space-y-2">
                   <Bell size={24} className="mx-auto opacity-40" />
@@ -212,7 +259,7 @@ export default function Header({ onNavigate }: HeaderProps) {
                   return (
                     <div
                       key={item.news_id}
-                      className="p-3.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)]/50 hover:bg-[color:var(--surface-muted)] transition-colors space-y-2"
+                      className="p-3.5 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)]/50 hover:bg-[color:var(--surface-muted)] transition-colors space-y-2 overflow-hidden"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-1.5">
@@ -225,12 +272,10 @@ export default function Header({ onNavigate }: HeaderProps) {
                           {relTime(item.published_at)}
                         </span>
                       </div>
-                      <p className="text-xs font-semibold text-[color:var(--foreground)] leading-snug">
+                      <p className="text-xs font-semibold text-[color:var(--foreground)] leading-snug break-all">
                         {item.title}
                       </p>
-                      <p className="text-xs text-[color:var(--foreground-secondary)] leading-relaxed">
-                        {item.body}
-                      </p>
+                      <NewsCardBody body={item.body} />
                     </div>
                   );
                 })

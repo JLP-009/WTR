@@ -251,13 +251,17 @@ export interface AdminLeaderboardEntry {
   total_pnl: DecimalString;
   return_percent: DecimalString;
   updated_at: ISOTimestamp;
+  trades_count?: number;
+  starting_capital?: DecimalString;
 }
 
 export interface AdminLeaderboard {
   entries: AdminLeaderboardEntry[];
+  top_10?: AdminLeaderboardEntry[];
   total_participants: number;
   as_of: ISOTimestamp;
   version: number;
+  is_event_ended?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -20,7 +20,7 @@ export const ledgerReason = pgEnum('ledger_reason', ['INITIAL_CAPITAL', 'ORDER_R
 export const newsType = pgEnum('news_type', ['MARKET_UPDATE', 'EVENT_UPDATE', 'ANNOUNCEMENT']);
 
 export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(), publicId: text('public_id').notNull(), participantId: text('participant_id').notNull(), displayName: text('display_name').notNull(), passwordHash: text('password_hash').notNull(), role: userRole('role').notNull().default('PARTICIPANT'), accountStatus: accountStatus('account_status').notNull().default('ACTIVE'), createdAt: auditTime('created_at'), updatedAt: auditTime('updated_at'),
+  id: uuid('id').primaryKey().defaultRandom(), publicId: text('public_id').notNull(), participantId: text('participant_id').notNull(), displayName: text('display_name').notNull(), passwordHash: text('password_hash').notNull(), registeredDeviceId: text('registered_device_id'), role: userRole('role').notNull().default('PARTICIPANT'), accountStatus: accountStatus('account_status').notNull().default('ACTIVE'), createdAt: auditTime('created_at'), updatedAt: auditTime('updated_at'),
 }, (t) => [uniqueIndex('users_public_id_unique').on(t.publicId), uniqueIndex('users_participant_id_unique').on(t.participantId)]);
 
 export const refreshTokens = pgTable('refresh_tokens', {

@@ -13,6 +13,7 @@ import ErrorState from '../common/ErrorState';
 import { useTheme } from '../../contexts/ThemeContext';
 import LWChart from './LWChart';
 import FlipWarning from './FlipWarning';
+import ConfirmDialog from '../common/ConfirmDialog';
 
 function fmt(n: number) {
   return new Intl.NumberFormat('en-IN', {
@@ -25,6 +26,7 @@ export default function ChartPage() {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
+  const [tradableSymbols, setTradableSymbols] = useState<string[]>(TRADABLE_SYMBOLS);
   const [symbol, setSymbol] = useState(TRADABLE_SYMBOLS[0]);
   const [market, setMarket] = useState<MarketState | null>(null);
   const [marketStatus, setMarketStatus] = useState<string>('OPEN');
@@ -45,14 +47,30 @@ export default function ChartPage() {
     currentPos: Position | null;
     result: 'FLIP' | string;
   } | null>(null);
+  const [confirmOrder, setConfirmOrder] = useState<{
+    side: 'BUY' | 'SELL';
+    qty: number;
+    estValue: number;
+  } | null>(null);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
   const currentPos = positions.find((p) => p.symbol === symbol) ?? null;
 
   useEffect(() => {
-    // Initial market status check
+    // Initial market status and instruments list check
     api.get<{ status: string }>('/market/status')
       .then((res) => {
         if (res && res.status) setMarketStatus(res.status);
+      })
+      .catch(() => {});
+
+    api.get<Array<{ symbol: string }>>('/market/instruments')
+      .then((instruments) => {
+        if (Array.isArray(instruments) && instruments.length > 0) {
+          const syms = instruments.map((i) => i.symbol);
+          setTradableSymbols(syms);
+          setSymbol((prev) => (syms.includes(prev) ? prev : syms[0]));
+        }
       })
       .catch(() => {});
 
@@ -180,6 +198,14 @@ export default function ChartPage() {
         return;
       }
     }
+    const est = market ? qty * market.ltp : 0;
+    setConfirmOrder({ side, qty, estValue: est });
+  };
+
+  const confirmTradeOrder = () => {
+    if (!confirmOrder) return;
+    const { side, qty } = confirmOrder;
+    setConfirmOrder(null);
     executeOrder(side, qty);
   };
 
@@ -204,8 +230,14 @@ export default function ChartPage() {
     }
   };
 
-  const handleClose = async () => {
+  const handleClose = () => {
     if (!currentPos || currentPos.quantity <= 0) return;
+    setShowCloseConfirm(true);
+  };
+
+  const confirmClosePosition = async () => {
+    if (!currentPos || currentPos.quantity <= 0) return;
+    setShowCloseConfirm(false);
     const side = currentPos.side === 'LONG' ? 'SELL' : 'BUY';
     await executeOrder(side, currentPos.quantity);
   };
@@ -269,7 +301,7 @@ export default function ChartPage() {
             className="absolute top-full left-0 right-0 mt-1 z-50 bg-[color:var(--surface-elevated)] border border-[color:var(--border)] rounded-xl shadow-lg overflow-hidden"
           >
             <div className="max-h-48 overflow-y-auto">
-              {TRADABLE_SYMBOLS.map((s) => (
+              {tradableSymbols.map((s) => (
                 <button
                   key={s}
                   role="option"
@@ -450,6 +482,34 @@ export default function ChartPage() {
           currentPos={pendingOrder.currentPos}
           onConfirm={confirmFlip}
           onCancel={() => setPendingOrder(null)}
+        />
+      )}
+
+      {/* Trade Order Confirmation Dialog */}
+      {confirmOrder && (
+        <ConfirmDialog
+          open={!!confirmOrder}
+          onClose={() => setConfirmOrder(null)}
+          onConfirm={confirmTradeOrder}
+          title={`Confirm ${confirmOrder.side} Order?`}
+          description={`Place a MARKET ${confirmOrder.side} order for ${confirmOrder.qty} share(s) of ${symbol} at ~₹${fmt(market?.ltp ?? 0)} (Estimated Value: ₹${fmt(confirmOrder.estValue)})?`}
+          confirmLabel={isSubmitting ? 'Placing…' : `Confirm ${confirmOrder.side}`}
+          variant={confirmOrder.side === 'BUY' ? 'success' : 'danger'}
+          loading={isSubmitting}
+        />
+      )}
+
+      {/* Close Position Confirmation Dialog */}
+      {currentPos && (
+        <ConfirmDialog
+          open={showCloseConfirm}
+          onClose={() => setShowCloseConfirm(false)}
+          onConfirm={confirmClosePosition}
+          title={`Close ${symbol} Position?`}
+          description={`Are you sure you want to close your ${currentPos.side} position of ${currentPos.quantity} shares of ${symbol} at current market price (₹${fmt(market?.ltp ?? 0)})?`}
+          confirmLabel={isSubmitting ? 'Closing…' : 'Close Position'}
+          destructive={true}
+          loading={isSubmitting}
         />
       )}
     </div>

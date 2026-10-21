@@ -121,13 +121,15 @@ export class PortfolioService {
           const invested = avgPrice.times(qty);
           const unPnl = avgPrice.minus(curPrice).times(qty);
           totalInvested = totalInvested.plus(invested);
+          totalMarketValue = totalMarketValue.plus(invested.plus(unPnl));
           totalUnrealizedPnl = totalUnrealizedPnl.plus(unPnl);
         }
       }
     }
 
-    const equity = availableCash.plus(reservedCash).plus(totalMarketValue);
+    const startingCapital = new Decimal(portfolio?.startingCapital || '1000000');
     const totalPnl = realizedPnl.plus(totalUnrealizedPnl);
+    const equity = startingCapital.plus(totalPnl);
 
     return {
       cash: availableCash.toFixed(2),

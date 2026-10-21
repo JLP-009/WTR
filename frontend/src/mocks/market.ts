@@ -1,8 +1,8 @@
 import type { MarketState, MarketDataResponse, Timeframe } from '../contracts/v1/market';
 
 export const TRADABLE_SYMBOLS = [
-  'NIFTY',
-  'BANKNIFTY',
+  'NIFTY_50',
+  'BANK_NIFTY',
   'RELIANCE',
   'TCS',
   'INFY',

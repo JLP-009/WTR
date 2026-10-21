@@ -224,6 +224,8 @@ export class SimulationWorker {
         .where(eq(schema.positions.eventId, activeEvent.id));
 
       const userUnrealizedPnl = new Map<string, Decimal>();
+      const userInvestedAmount = new Map<string, Decimal>();
+      const userMarketValue = new Map<string, Decimal>();
 
       for (const pos of openPositions) {
         if (!pos.instrumentId || pos.quantity <= 0) continue;
@@ -233,17 +235,25 @@ export class SimulationWorker {
         const avgEntry = new Decimal(pos.averageEntryPrice || '0');
         const qty = new Decimal(pos.quantity);
         let unrealized = new Decimal(0);
+        let invested = avgEntry.times(qty);
+        let marketValue = new Decimal(0);
 
         if (pos.side === 'LONG') {
           unrealized = currentPrice.minus(avgEntry).times(qty);
+          marketValue = currentPrice.times(qty);
         } else if (pos.side === 'SHORT') {
           unrealized = avgEntry.minus(currentPrice).times(qty);
+          marketValue = invested.plus(unrealized);
         }
 
-        const marketValue = currentPrice.times(qty);
+        const prevUnrealized = userUnrealizedPnl.get(pos.userId) || new Decimal(0);
+        userUnrealizedPnl.set(pos.userId, prevUnrealized.plus(unrealized));
 
-        const existing = userUnrealizedPnl.get(pos.userId) || new Decimal(0);
-        userUnrealizedPnl.set(pos.userId, existing.plus(unrealized));
+        const prevInvested = userInvestedAmount.get(pos.userId) || new Decimal(0);
+        userInvestedAmount.set(pos.userId, prevInvested.plus(invested));
+
+        const prevMVal = userMarketValue.get(pos.userId) || new Decimal(0);
+        userMarketValue.set(pos.userId, prevMVal.plus(marketValue));
       }
 
       // Compute all portfolios and broadcast live PnL every 2 seconds
@@ -254,26 +264,37 @@ export class SimulationWorker {
 
       for (const port of allPortfolios) {
         const unrealized = userUnrealizedPnl.get(port.userId) || new Decimal(0);
+        const invested = userInvestedAmount.get(port.userId) || new Decimal(0);
+        const marketVal = userMarketValue.get(port.userId) || new Decimal(0);
         const realized = new Decimal(port.realizedPnl || '0');
         const available = new Decimal(port.availableCash || '0');
         const reserved = new Decimal(port.reservedCash || '0');
         const startCap = new Decimal(port.startingCapital || '1000000');
 
         const totalPnl = realized.plus(unrealized);
-        const equity = available.plus(reserved).plus(unrealized);
+        const equity = startCap.plus(totalPnl);
         const totalPnlPct = startCap.isZero() ? new Decimal(0) : totalPnl.dividedBy(startCap).times(100);
 
         const portfolioPayload = {
+          cash: available.toFixed(2),
+          available_cash: available.toFixed(2),
           cash_balance: available.toFixed(2),
           available_margin: available.toFixed(2),
           used_margin: reserved.toFixed(2),
           reserved_cash: reserved.toFixed(2),
+          invested_amount: invested.toFixed(2),
+          investedValue: invested.toNumber(),
+          market_value: marketVal.toFixed(2),
           realized_pnl: realized.toFixed(2),
           unrealized_pnl: unrealized.toFixed(2),
+          daily_pnl: totalPnl.toFixed(2),
           total_pnl: totalPnl.toFixed(2),
           total_pnl_percent: totalPnlPct.toFixed(2),
           equity: equity.toFixed(2),
+          portfolioValue: equity.toNumber(),
           starting_capital: startCap.toFixed(2),
+          currentBalance: available.toNumber(),
+          availableCash: available.toNumber(),
           totalPnl: totalPnl.toNumber(),
           totalPnlPct: totalPnlPct.toNumber(),
           todayPnl: totalPnl.toNumber(),

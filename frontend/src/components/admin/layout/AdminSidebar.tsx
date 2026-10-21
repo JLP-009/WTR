@@ -1,10 +1,13 @@
+import { useState } from 'react';
 import {
   LayoutDashboard, Zap, Database, Activity, BarChart3,
   Users, ShoppingCart, Briefcase, Trophy, Newspaper,
-  Monitor, ClipboardList, LogOut, ChevronRight, Shield,
+  Monitor, ClipboardList, LogOut, ChevronRight, Shield, RotateCcw,
 } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import type { AdminRoute } from '../../../admin/AdminApp';
+import ConfirmDialog from '../common/ConfirmDialog';
+import { resetAdminTrades } from '../../../lib/api/admin';
 
 interface AdminSidebarProps {
   current: AdminRoute;
@@ -51,10 +54,30 @@ const NAV_GROUPS: {
 
 export default function AdminSidebar({ current, onNavigate, onClose }: AdminSidebarProps) {
   const { logout } = useAuth();
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState('');
+  const [resetError, setResetError] = useState('');
 
   const handleNav = (route: AdminRoute) => {
     onNavigate(route);
     onClose?.();
+  };
+
+  const handleResetTrades = async () => {
+    setResetLoading(true);
+    setResetError('');
+    try {
+      await resetAdminTrades();
+      setResetDialogOpen(false);
+      setResetSuccess('Trades & portfolios reset successfully!');
+      window.dispatchEvent(new CustomEvent('wtr:admin-reset'));
+      setTimeout(() => setResetSuccess(''), 4000);
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : 'Reset failed');
+    } finally {
+      setResetLoading(false);
+    }
   };
 
   return (
@@ -110,7 +133,27 @@ export default function AdminSidebar({ current, onNavigate, onClose }: AdminSide
       </nav>
 
       {/* Footer */}
-      <div className="flex-shrink-0 border-t border-[color:var(--border)] p-3">
+      <div className="flex-shrink-0 border-t border-[color:var(--border)] p-3 space-y-2">
+        {resetSuccess && (
+          <p className="text-[10px] font-semibold text-[color:var(--success)] bg-[color:var(--success)]/10 px-2 py-1 rounded text-center">
+            {resetSuccess}
+          </p>
+        )}
+        {resetError && (
+          <p className="text-[10px] font-semibold text-[color:var(--danger)] bg-[color:var(--danger)]/10 px-2 py-1 rounded text-center">
+            {resetError}
+          </p>
+        )}
+
+        <button
+          onClick={() => setResetDialogOpen(true)}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-[color:var(--danger)] hover:bg-[color:var(--danger)]/10 border border-[color:var(--danger)]/25 transition-colors"
+          title="Reset all trades, orders, and participant portfolios"
+        >
+          <RotateCcw size={14} className="text-[color:var(--danger)] shrink-0" />
+          <span className="flex-1 text-left">Reset Trades & Portfolios</span>
+        </button>
+
         <button
           onClick={() => { logout(); onClose?.(); }}
           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[color:var(--foreground-secondary)] hover:text-[color:var(--danger)] hover:bg-[color:var(--danger)]/8 transition-colors"
@@ -119,6 +162,18 @@ export default function AdminSidebar({ current, onNavigate, onClose }: AdminSide
           Exit Admin
         </button>
       </div>
+
+      <ConfirmDialog
+        open={resetDialogOpen}
+        onClose={() => !resetLoading && setResetDialogOpen(false)}
+        onConfirm={handleResetTrades}
+        title="Reset All Trades & Portfolios?"
+        description="This will permanently clear all orders, executions, positions, audit logs, and news, and reset all participant portfolios back to ₹10,00,000 starting cash. This action cannot be undone."
+        confirmLabel="Reset Everything"
+        cancelLabel="Cancel"
+        destructive
+        loading={resetLoading}
+      />
     </div>
   );
 }
