@@ -131,19 +131,19 @@ export default function PositionsPage() {
   return (
     <div className="space-y-4">
       {/* Header and Tab Switcher */}
-      <div className="flex items-center justify-between">
-        <div className="flex p-1 bg-[color:var(--surface-muted)] rounded-xl border border-[color:var(--border)]">
+      <div className="w-full min-w-0">
+        <div className="grid grid-cols-2 p-1 bg-[color:var(--surface-muted)] rounded-xl border border-[color:var(--border)] w-full min-w-0">
           <button
             onClick={() => setActiveTab('positions')}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+            className={`flex items-center justify-center gap-1.5 px-2 sm:px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all min-w-0 ${
               activeTab === 'positions'
                 ? 'bg-[color:var(--surface)] text-[color:var(--foreground)] shadow-xs'
                 : 'text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)]'
             }`}
           >
-            <Briefcase size={13} />
-            <span>Open Positions</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+            <Briefcase size={13} className="shrink-0" />
+            <span className="truncate">Open Positions</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold shrink-0 ${
               activeTab === 'positions' ? 'bg-[color:var(--accent)] text-white' : 'bg-[color:var(--border)] text-[color:var(--foreground-muted)]'
             }`}>
               {positions.length}
@@ -151,15 +151,15 @@ export default function PositionsPage() {
           </button>
           <button
             onClick={() => { setActiveTab('trades'); loadTrades(); }}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+            className={`flex items-center justify-center gap-1.5 px-2 sm:px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all min-w-0 ${
               activeTab === 'trades'
                 ? 'bg-[color:var(--surface)] text-[color:var(--foreground)] shadow-xs'
                 : 'text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)]'
             }`}
           >
-            <History size={13} />
-            <span>Previous Trades</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+            <History size={13} className="shrink-0" />
+            <span className="truncate">Previous Trades</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold shrink-0 ${
               activeTab === 'trades' ? 'bg-[color:var(--accent)] text-white' : 'bg-[color:var(--border)] text-[color:var(--foreground-muted)]'
             }`}>
               {trades.length}

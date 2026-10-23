@@ -78,7 +78,7 @@ export default function BalancePage() {
             <p className="text-[11px] font-medium uppercase tracking-widest text-[color:var(--foreground-muted)] mb-1">
               Portfolio Value
             </p>
-            <p className="text-4xl font-bold tabular-nums text-[color:var(--foreground)]">
+            <p className="text-2xl sm:text-3xl md:text-4xl font-bold tabular-nums text-[color:var(--foreground)] truncate">
               ₹{fmt(portfolio.portfolioValue ?? 1000000)}
             </p>
             <p className="text-sm tabular-nums text-[color:var(--success)] mt-1.5 font-medium">

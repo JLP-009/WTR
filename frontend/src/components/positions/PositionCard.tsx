@@ -31,7 +31,7 @@ export default function PositionCard({ position, onClosed }: PositionCardProps) 
   const closeLabel = position.side === 'LONG' ? 'Market Sell' : 'Market Buy';
 
   return (
-    <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-xl p-4">
+    <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-xl p-3.5 sm:p-4 w-full min-w-0 overflow-hidden">
       {/* Top row: symbol + P&L */}
       <div className="flex items-start justify-between mb-3">
         <div>

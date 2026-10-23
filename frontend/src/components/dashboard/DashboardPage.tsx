@@ -110,7 +110,7 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
         <div>
           <p className="text-xs text-[color:var(--foreground-muted)] uppercase tracking-widest">{greeting}</p>
           <div className="flex items-center gap-2 mt-0.5">
-            <h2 className="text-2xl font-semibold text-[color:var(--foreground)]">
+            <h2 className="text-xl sm:text-2xl font-semibold text-[color:var(--foreground)] truncate">
               {participant?.displayName ?? 'Trader'}
             </h2>
             {participant?.participantId && (
@@ -149,9 +149,9 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
             <p className="text-[11px] font-medium uppercase tracking-widest text-[color:var(--foreground-muted)] mb-3">
               Total P&L
             </p>
-            <div className="flex items-end gap-3">
+            <div className="flex flex-wrap sm:flex-nowrap items-baseline gap-2 sm:gap-3">
               <span
-                className={`text-4xl font-bold tabular-nums leading-none ${
+                className={`text-2xl sm:text-3xl md:text-4xl font-bold tabular-nums leading-tight truncate ${
                   (portfolio.totalPnl ?? 0) >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
                 }`}
               >
@@ -184,7 +184,7 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
             <p className="text-[11px] font-medium uppercase tracking-widest text-[color:var(--foreground-muted)] mb-1">
               Current Balance
             </p>
-            <p className="text-3xl font-bold text-[color:var(--foreground)] tabular-nums">
+            <p className="text-2xl sm:text-3xl md:text-4xl font-bold text-[color:var(--foreground)] tabular-nums truncate">
               ₹{fmt(portfolio.currentBalance ?? 1000000)}
             </p>
           </div>

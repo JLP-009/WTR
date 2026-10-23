@@ -81,9 +81,9 @@ export default function PnlPage() {
             <p className="text-[11px] font-medium uppercase tracking-widest text-[color:var(--foreground-muted)] mb-2">
               Total P&L
             </p>
-            <div className="flex items-end gap-3">
+            <div className="flex flex-wrap sm:flex-nowrap items-baseline gap-2 sm:gap-3">
               <span
-                className={`text-4xl font-bold tabular-nums leading-none ${
+                className={`text-2xl sm:text-3xl md:text-4xl font-bold tabular-nums leading-tight truncate ${
                   (portfolio.totalPnl ?? 0) >= 0 ? 'text-[color:var(--success)]' : 'text-[color:var(--danger)]'
                 }`}
               >

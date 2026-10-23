@@ -101,7 +101,7 @@ function AppContent() {
   const handleBack = () => setRoute(prevRoute === 'leaderboard' ? 'dashboard' : prevRoute);
 
   return (
-    <div className="flex flex-col h-full bg-[color:var(--background)]">
+    <div className="flex flex-col h-full bg-[color:var(--background)] overflow-x-hidden w-full">
       <Header onNavigate={handleNavigate} />
 
       <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
