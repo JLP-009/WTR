@@ -174,25 +174,44 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
       .orderBy(desc(schema.events.createdAt))
       .limit(1);
 
-    if (activeEvent?.status === 'ENDED' && !(activeEvent as any)?.ranksReleased && request.user?.role !== 'ADMIN') {
-      return { data: null, ranks_released: false, request_id: request.requestId, message: 'Trading event has ended. Ranks are not released yet.' };
+    const isRanksReleased = Boolean((activeEvent as any)?.ranksReleased);
+
+    // If event is ENDED and ranks are not released yet, hide details from non-admin participants
+    if (activeEvent?.status === 'ENDED' && !isRanksReleased && request.user?.role !== 'ADMIN') {
+      return {
+        data: {
+          rank: null,
+          ranks_released: false,
+          total_participants: 0,
+        },
+        request_id: request.requestId,
+        message: 'Trading event has ended. Ranks are not released yet.'
+      };
     }
 
     const list = await getLeaderboardData();
-    const myEntry = list.find((e) => e.participant_id === request.user!.participantId);
+    const myEntry = list.find(
+      (e) => e.participant_id.trim().toUpperCase() === request.user!.participantId.trim().toUpperCase()
+    );
+
+    const entryData = myEntry || {
+      rank: list.length + 1,
+      user_id: request.user!.publicId,
+      participant_id: request.user!.participantId,
+      display_name: (request.user as any)?.displayName || request.user!.participantId,
+      starting_capital: '1000000.00',
+      equity: '1000000.00',
+      total_pnl: '0.00',
+      total_pnl_percent: '0.00',
+      trades_count: 0,
+    };
+
     return {
-      ranks_released: Boolean((activeEvent as any)?.ranksReleased),
-      total_participants: list.length,
-      data: myEntry || {
-        rank: list.length + 1,
-        user_id: request.user!.publicId,
-        participant_id: request.user!.participantId,
-        display_name: request.user!.participantId,
-        starting_capital: '1000000.00',
-        equity: '1000000.00',
-        total_pnl: '0.00',
-        total_pnl_percent: '0.00',
-        trades_count: 0,
+      data: {
+        ...entryData,
+        rank: entryData.rank,
+        ranks_released: isRanksReleased,
+        total_participants: list.length,
       },
       request_id: request.requestId,
     };

@@ -1064,6 +1064,8 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       .set({ ranksReleased: true, updatedAt: new Date() })
       .where(eq(schema.events.id, event.id));
 
+    MarketService.clearCache();
+
     if (app.wsGateway) {
       app.wsGateway.broadcast('ranks_released', {
         ranks_released: true,
@@ -1103,6 +1105,8 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       .update(schema.events)
       .set({ ranksReleased: false, updatedAt: new Date() })
       .where(eq(schema.events.id, event.id));
+
+    MarketService.clearCache();
 
     if (app.wsGateway) {
       app.wsGateway.broadcast('ranks_released', {

@@ -54,18 +54,18 @@ export interface ParticipantRankStatus {
 
 export async function getMyRankStatus(): Promise<ParticipantRankStatus> {
   try {
-    const res = await api.get<{
-      data?: { rank: number };
+    const data = await api.get<{
+      rank?: number | null;
       total_participants?: number;
       ranks_released?: boolean;
     }>('/leaderboard/me');
 
     return {
-      ranks_released: Boolean(res?.ranks_released),
-      rank: res?.data?.rank,
-      total_participants: res?.total_participants,
+      ranks_released: Boolean(data?.ranks_released),
+      rank: typeof data?.rank === 'number' ? data.rank : null,
+      total_participants: data?.total_participants ?? 0,
     };
   } catch {
-    return { ranks_released: false };
+    return { ranks_released: false, rank: null, total_participants: 0 };
   }
 }

@@ -80,6 +80,11 @@ export class MarketService {
     expiresAt: number;
   } | null = null;
 
+  public static clearCache() {
+    MarketService.cachedEventState = null;
+    MarketService.cachedInstrumentsList = null;
+  }
+
   public constructor(private readonly db: Database) {}
 
   public async getMarketStatus(): Promise<MarketStatusData> {
