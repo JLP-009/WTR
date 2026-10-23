@@ -6,15 +6,18 @@ import {
   Download,
   Award,
   Users,
-  TrendingUp,
-  ArrowUpDown,
-  ShieldCheck,
+  Radio,
   CheckCircle2,
 } from 'lucide-react';
 import ErrorState from '../../common/ErrorState';
 import EmptyState from '../../common/EmptyState';
 import { SkeletonCard } from '../../common/LoadingState';
-import { getAdminLeaderboardMonitor } from '../../../lib/api/admin';
+import ConfirmDialog from '../common/ConfirmDialog';
+import {
+  getAdminLeaderboardMonitor,
+  releaseRanks,
+  unreleaseRanks,
+} from '../../../lib/api/admin';
 import type { AdminLeaderboard, AdminLeaderboardEntry } from '../../../types/admin';
 
 const fmtCur = (s: string) =>
@@ -92,8 +95,6 @@ export default function FinalRankingsPage() {
     return result;
   }, [allEntries, filter, search]);
 
-  // Export CSV
-
   const handleReleaseRanks = async () => {
     setActionLoading(true);
     try {
@@ -124,6 +125,7 @@ export default function FinalRankingsPage() {
     }
   };
 
+  // Export CSV
   const exportCsv = () => {
     if (!allEntries || allEntries.length === 0) return;
     const headers = ['Rank', 'Participant ID', 'Display Name', 'Final Portfolio Value (INR)', 'Total P&L (INR)', 'Return %', 'Trades Count'];
@@ -156,32 +158,10 @@ export default function FinalRankingsPage() {
         {Array.from({ length: 3 }).map((_, i) => (
           <SkeletonCard key={i} />
         ))}
-      
-      {/* Confirmation Dialogs */}
-      <ConfirmDialog
-        open={showReleaseConfirm}
-        title="Release Final Ranks to Participants?"
-        message="This will immediately reveal the official rankings, podium finishes, and positions to all participants on their screens. Are you ready to make results public?"
-        confirmLabel="Release Ranks Now"
-        variant="warning"
-        loading={actionLoading}
-        onConfirm={handleReleaseRanks}
-        onCancel={() => setShowReleaseConfirm(false)}
-      />
+      </div>
+    );
+  }
 
-      <ConfirmDialog
-        open={showUnreleaseConfirm}
-        title="Hide Ranks From Participants?"
-        message="This will revert participants' screens back to 'Revealed at the closing ceremony'. You can re-release ranks at any time."
-        confirmLabel="Hide Ranks"
-        variant="danger"
-        loading={actionLoading}
-        onConfirm={handleUnreleaseRanks}
-        onCancel={() => setShowUnreleaseConfirm(false)}
-      />
-    </div>
-  );
-}
   if (error) {
     return (
       <div className="p-6">
@@ -221,7 +201,34 @@ export default function FinalRankingsPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Release Ranks Button */}
+          {board?.ranks_released ? (
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                <CheckCircle2 size={14} />
+                <span>Ranks Released (Public)</span>
+              </span>
+              <button
+                onClick={() => setShowUnreleaseConfirm(true)}
+                disabled={actionLoading}
+                className="px-2.5 py-2 text-xs font-medium rounded-xl border border-[color:var(--border)] text-[color:var(--foreground-muted)] hover:text-[color:var(--danger)] hover:border-[color:var(--danger)]/30 transition-colors"
+                title="Hide ranks from participants"
+              >
+                Hide
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowReleaseConfirm(true)}
+              disabled={actionLoading}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-400 text-black hover:bg-amber-300 transition-colors shadow-sm"
+            >
+              <Radio size={14} className="animate-pulse" />
+              <span>Release Ranks to Participants</span>
+            </button>
+          )}
+
           <button
             onClick={exportCsv}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-[color:var(--accent)] text-white hover:opacity-90 transition-opacity shadow-sm"
@@ -239,6 +246,14 @@ export default function FinalRankingsPage() {
           </button>
         </div>
       </div>
+
+      {/* Success alert message if any */}
+      {actionSuccess && (
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center gap-2">
+          <CheckCircle2 size={15} />
+          <span>{actionSuccess}</span>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -450,6 +465,28 @@ export default function FinalRankingsPage() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Dialogs */}
+      <ConfirmDialog
+        open={showReleaseConfirm}
+        onClose={() => setShowReleaseConfirm(false)}
+        onConfirm={handleReleaseRanks}
+        title="Release Final Ranks to Participants?"
+        description="This will immediately reveal the official rankings, podium finishes, and positions to all participants on their screens. Are you ready to make results public?"
+        confirmLabel="Release Ranks Now"
+        loading={actionLoading}
+      />
+
+      <ConfirmDialog
+        open={showUnreleaseConfirm}
+        onClose={() => setShowUnreleaseConfirm(false)}
+        onConfirm={handleUnreleaseRanks}
+        title="Hide Ranks From Participants?"
+        description="This will revert participants' screens back to 'Revealed at the closing ceremony'. You can re-release ranks at any time."
+        confirmLabel="Hide Ranks"
+        destructive
+        loading={actionLoading}
+      />
     </div>
   );
 }
