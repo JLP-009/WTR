@@ -645,43 +645,10 @@ export default function EventEndedThankYou({
             <i></i>Market closed
           </div>
           <h1>
-            Your risk is being <span>ranked.</span>
+            Your portfolio is being <span>ranked.</span>
           </h1>
           <p className="sub">Returns counted. Risk weighed. Rank on its way.</p>
         </section>
-
-        {/* 3-Step Tracker */}
-        <ol className="track" aria-label="Results progress">
-          <li className="done">
-            <span className="node">
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 8.5l3.2 3.2L13 4.8" />
-              </svg>
-            </span>
-            <span className="step-name">Trades locked</span>
-            <span className="step-state">Done</span>
-          </li>
-          <li className="active" aria-current="step">
-            <span className="node">
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 12l3.5-4 3 2.5L14 4" />
-                <path d="M10.5 4H14v3.5" />
-              </svg>
-            </span>
-            <span className="step-name">Risk measured</span>
-            <span className="step-state">In progress</span>
-          </li>
-          <li className="locked">
-            <span className="node">
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3.5" y="7" width="9" height="6.5" rx="1.6" />
-                <path d="M5.5 7V5.2a2.5 2.5 0 015 0V7" />
-              </svg>
-            </span>
-            <span className="step-name">Rank revealed</span>
-            <span className="step-state">Locked</span>
-          </li>
-        </ol>
 
         {/* Result Card */}
         <section className="card" aria-label="Your result">
@@ -706,18 +673,6 @@ export default function EventEndedThankYou({
                 {isPositive ? '+' : '−'}
                 {inr(pl)} ({isPositive ? '+' : '−'}
                 {Math.abs(pct).toFixed(2)}%)
-              </span>
-            </div>
-          </div>
-          <div className="row pending-row">
-            <div>
-              <span className="label">Risk score</span>
-              <span className="calc">Calculating…</span>
-            </div>
-            <div className="right">
-              <span className="label">Basis</span>
-              <span className="val" style={{ fontSize: '14px', fontWeight: 500, color: 'var(--muted)' }}>
-                Returns vs. risk taken
               </span>
             </div>
           </div>

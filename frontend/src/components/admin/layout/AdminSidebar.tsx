@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   LayoutDashboard, Zap, Database, Activity, BarChart3,
   Users, ShoppingCart, Briefcase, Trophy, Newspaper,
-  Monitor, ClipboardList, LogOut, ChevronRight, Shield, RotateCcw,
+  Monitor, ClipboardList, LogOut, ChevronRight, Shield, RotateCcw, Award,
 } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import type { AdminRoute } from '../../../admin/AdminApp';
@@ -40,6 +40,7 @@ const NAV_GROUPS: {
       { route: 'orders',       label: 'Orders',      Icon: ShoppingCart },
       { route: 'positions',    label: 'Positions',   Icon: Briefcase },
       { route: 'leaderboard',  label: 'Leaderboard', Icon: Trophy },
+      { route: 'rankings',     label: 'Final Rankings', Icon: Award },
     ],
   },
   {

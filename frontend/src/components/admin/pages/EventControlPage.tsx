@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { RefreshCw, Play, Pause, Square, RotateCcw, Lock, Calendar } from 'lucide-react';
+import { RefreshCw, Play, Pause, Square, RotateCcw, Lock, Calendar, Trophy, ChevronRight } from 'lucide-react';
+import type { AdminRoute } from '../../../admin/AdminApp';
 import StatusBadge from '../common/StatusBadge';
 import ConfirmDialog from '../common/ConfirmDialog';
 import ErrorState from '../../common/ErrorState';
@@ -22,7 +23,7 @@ function Field({ label, value, mono }: { label: string; value: React.ReactNode; 
   );
 }
 
-export default function EventControlPage() {
+export default function EventControlPage({ onNavigate }: { onNavigate?: (r: AdminRoute) => void } = {}) {
   const [event, setEvent] = useState<AdminEventState | null>(null);
   const [config, setConfig] = useState<AdminEventConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,6 +93,32 @@ export default function EventControlPage() {
           Refresh
         </button>
       </div>
+
+      {/* Event Ended Rankings Notification */}
+      {s.event_status === 'ENDED' && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-transparent border border-amber-500/30 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+              <Trophy size={20} />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-amber-300">Event Concluded & Finalized</h2>
+              <p className="text-xs text-[color:var(--foreground-muted)]">
+                All participant portfolios are evaluated and final ranks have been generated.
+              </p>
+            </div>
+          </div>
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('rankings')}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-400 text-black font-bold text-xs hover:bg-amber-300 transition-colors shadow-sm"
+            >
+              <span>View Final Rankings</span>
+              <ChevronRight size={14} />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Action error */}
       {actionError && (

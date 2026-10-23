@@ -12,6 +12,7 @@ import AdminLeaderboardPage from '../components/admin/pages/AdminLeaderboardPage
 import NewsPage from '../components/admin/pages/NewsPage';
 import MonitoringPage from '../components/admin/pages/MonitoringPage';
 import AuditLogPage from '../components/admin/pages/AuditLogPage';
+import FinalRankingsPage from '../components/admin/pages/FinalRankingsPage';
 
 export type AdminRoute =
   | 'dashboard'
@@ -23,6 +24,7 @@ export type AdminRoute =
   | 'orders'
   | 'positions'
   | 'leaderboard'
+  | 'rankings'
   | 'news'
   | 'monitoring'
   | 'audit';
@@ -37,6 +39,7 @@ const ROUTE_META: Record<AdminRoute, { label: string; breadcrumbs: { label: stri
   orders:       { label: 'Orders',       breadcrumbs: [{ label: 'Admin' }, { label: 'Orders', active: true }] },
   positions:    { label: 'Positions',    breadcrumbs: [{ label: 'Admin' }, { label: 'Positions', active: true }] },
   leaderboard:  { label: 'Leaderboard', breadcrumbs: [{ label: 'Admin' }, { label: 'Leaderboard', active: true }] },
+  rankings:     { label: 'Final Rankings', breadcrumbs: [{ label: 'Admin' }, { label: 'Final Rankings', active: true }] },
   news:         { label: 'News',         breadcrumbs: [{ label: 'Admin' }, { label: 'News', active: true }] },
   monitoring:   { label: 'Monitoring',  breadcrumbs: [{ label: 'Admin' }, { label: 'Monitoring', active: true }] },
   audit:        { label: 'Audit Log',   breadcrumbs: [{ label: 'Admin' }, { label: 'Audit Log', active: true }] },
@@ -56,7 +59,7 @@ export default function AdminApp() {
     >
       <ErrorBoundary key={route}>
         {route === 'dashboard'   && <AdminDashboard onNavigate={setRoute} />}
-        {route === 'event'       && <EventControlPage />}
+        {route === 'event'       && <EventControlPage onNavigate={setRoute} />}
         {route === 'dataset'     && <DatasetPage />}
         {route === 'simulation'  && <SimulationPage />}
         {route === 'market'      && <MarketPage />}
@@ -64,6 +67,7 @@ export default function AdminApp() {
         {route === 'orders'      && <OrdersPage />}
         {route === 'positions'   && <PositionsPage />}
         {route === 'leaderboard' && <AdminLeaderboardPage />}
+        {route === 'rankings'    && <FinalRankingsPage />}
         {route === 'news'        && <NewsPage />}
         {route === 'monitoring'  && <MonitoringPage />}
         {route === 'audit'       && <AuditLogPage />}
