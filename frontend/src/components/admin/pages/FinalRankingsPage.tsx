@@ -43,6 +43,10 @@ export default function FinalRankingsPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'top10' | 'profit' | 'loss'>('all');
   const [copied, setCopied] = useState(false);
+  const [showReleaseConfirm, setShowReleaseConfirm] = useState(false);
+  const [showUnreleaseConfirm, setShowUnreleaseConfirm] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionSuccess, setActionSuccess] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -89,6 +93,37 @@ export default function FinalRankingsPage() {
   }, [allEntries, filter, search]);
 
   // Export CSV
+
+  const handleReleaseRanks = async () => {
+    setActionLoading(true);
+    try {
+      await releaseRanks();
+      setShowReleaseConfirm(false);
+      setActionSuccess('Ranks released to participants successfully!');
+      setTimeout(() => setActionSuccess(''), 4000);
+      await load();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to release ranks');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUnreleaseRanks = async () => {
+    setActionLoading(true);
+    try {
+      await unreleaseRanks();
+      setShowUnreleaseConfirm(false);
+      setActionSuccess('Ranks hidden from participants.');
+      setTimeout(() => setActionSuccess(''), 4000);
+      await load();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to hide ranks');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const exportCsv = () => {
     if (!allEntries || allEntries.length === 0) return;
     const headers = ['Rank', 'Participant ID', 'Display Name', 'Final Portfolio Value (INR)', 'Total P&L (INR)', 'Return %', 'Trades Count'];
@@ -121,10 +156,32 @@ export default function FinalRankingsPage() {
         {Array.from({ length: 3 }).map((_, i) => (
           <SkeletonCard key={i} />
         ))}
-      </div>
-    );
-  }
+      
+      {/* Confirmation Dialogs */}
+      <ConfirmDialog
+        open={showReleaseConfirm}
+        title="Release Final Ranks to Participants?"
+        message="This will immediately reveal the official rankings, podium finishes, and positions to all participants on their screens. Are you ready to make results public?"
+        confirmLabel="Release Ranks Now"
+        variant="warning"
+        loading={actionLoading}
+        onConfirm={handleReleaseRanks}
+        onCancel={() => setShowReleaseConfirm(false)}
+      />
 
+      <ConfirmDialog
+        open={showUnreleaseConfirm}
+        title="Hide Ranks From Participants?"
+        message="This will revert participants' screens back to 'Revealed at the closing ceremony'. You can re-release ranks at any time."
+        confirmLabel="Hide Ranks"
+        variant="danger"
+        loading={actionLoading}
+        onConfirm={handleUnreleaseRanks}
+        onCancel={() => setShowUnreleaseConfirm(false)}
+      />
+    </div>
+  );
+}
   if (error) {
     return (
       <div className="p-6">

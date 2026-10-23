@@ -159,8 +159,8 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
       .limit(1);
 
     // Leaderboard is hidden from non-admin participants when event is ended
-    if (activeEvent?.status === 'ENDED' && request.user?.role !== 'ADMIN') {
-      return { data: [], request_id: request.requestId, message: 'Trading event has ended. Leaderboard is restricted to event administrators.' };
+    if (activeEvent?.status === 'ENDED' && !(activeEvent as any)?.ranksReleased && request.user?.role !== 'ADMIN') {
+      return { data: [], ranks_released: false, request_id: request.requestId, message: 'Trading event has ended. Ranks are not released yet.' };
     }
 
     const data = await getLeaderboardData();
@@ -174,13 +174,15 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
       .orderBy(desc(schema.events.createdAt))
       .limit(1);
 
-    if (activeEvent?.status === 'ENDED' && request.user?.role !== 'ADMIN') {
-      return { data: null, request_id: request.requestId, message: 'Trading event has ended.' };
+    if (activeEvent?.status === 'ENDED' && !(activeEvent as any)?.ranksReleased && request.user?.role !== 'ADMIN') {
+      return { data: null, ranks_released: false, request_id: request.requestId, message: 'Trading event has ended. Ranks are not released yet.' };
     }
 
     const list = await getLeaderboardData();
     const myEntry = list.find((e) => e.participant_id === request.user!.participantId);
     return {
+      ranks_released: Boolean((activeEvent as any)?.ranksReleased),
+      total_participants: list.length,
       data: myEntry || {
         rank: list.length + 1,
         user_id: request.user!.publicId,

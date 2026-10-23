@@ -1042,7 +1042,82 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         as_of: new Date().toISOString(),
         version,
         is_event_ended: event.status === 'ENDED',
+        ranks_released: Boolean(event.ranksReleased),
       },
+      request_id: request.requestId,
+    };
+  });
+
+
+  // Release Ranks to Participants
+  app.post('/ranks/release', async (request) => {
+    const [event] = await app.db
+      .select()
+      .from(schema.events)
+      .orderBy(desc(schema.events.createdAt))
+      .limit(1);
+
+    if (!event) throw new AppError('NOT_FOUND', 404, 'No event found.');
+
+    await app.db
+      .update(schema.events)
+      .set({ ranksReleased: true, updatedAt: new Date() })
+      .where(eq(schema.events.id, event.id));
+
+    if (app.wsGateway) {
+      app.wsGateway.broadcast('ranks_released', {
+        ranks_released: true,
+        event_status: event.status,
+      });
+      app.wsGateway.broadcast('market_status', {
+        event_status: event.status,
+        ranks_released: true,
+      });
+    }
+
+    await broadcastLifecycleAlert(
+      'EVENT_UPDATE',
+      '🏆 Final Ranks Released!',
+      'Official tournament rankings have been released by event administrators. Check your final rank now!',
+      request.user?.userId
+    );
+
+    return {
+      data: { ranks_released: true },
+      message: 'Final rankings successfully released to participants.',
+      request_id: request.requestId,
+    };
+  });
+
+  // Unrelease / Hide Ranks
+  app.post('/ranks/unrelease', async (request) => {
+    const [event] = await app.db
+      .select()
+      .from(schema.events)
+      .orderBy(desc(schema.events.createdAt))
+      .limit(1);
+
+    if (!event) throw new AppError('NOT_FOUND', 404, 'No event found.');
+
+    await app.db
+      .update(schema.events)
+      .set({ ranksReleased: false, updatedAt: new Date() })
+      .where(eq(schema.events.id, event.id));
+
+    if (app.wsGateway) {
+      app.wsGateway.broadcast('ranks_released', {
+        ranks_released: false,
+        event_status: event.status,
+      });
+      app.wsGateway.broadcast('market_status', {
+        event_status: event.status,
+        ranks_released: false,
+      });
+    }
+
+    return {
+      data: { ranks_released: false },
+      message: 'Final rankings hidden from participants.',
       request_id: request.requestId,
     };
   });

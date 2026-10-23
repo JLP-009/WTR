@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { sql } from 'drizzle-orm';
 import type { Environment } from './config/env.js';
 import { createDatabase } from './db/client.js';
 import { errorHandlerPlugin } from './plugins/error-handler.js';
@@ -13,6 +14,7 @@ export async function buildApp(env: Environment): Promise<FastifyInstance> {
   
   const db = createDatabase(env);
   app.decorate('db', db);
+  db.execute(sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS ranks_released boolean NOT NULL DEFAULT false;`).catch(() => {});
 
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body: string, done) => {
     if (!body || (typeof body === 'string' && body.trim() === '')) {

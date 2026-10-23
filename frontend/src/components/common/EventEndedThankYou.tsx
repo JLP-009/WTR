@@ -1,5 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { getPortfolioSummary } from '../../lib/api/portfolio';
+import { getMyRankStatus, type ParticipantRankStatus } from '../../lib/api/leaderboard';
+import { wsClient } from '../../lib/websocket';
 import type { PortfolioSummary } from '../../contracts/v1/portfolio';
 import type { Participant } from '../../contracts/v1/auth';
 
@@ -676,16 +678,38 @@ export default function EventEndedThankYou({
               </span>
             </div>
           </div>
-          <div className="row">
+                    <div className="row">
             <div>
               <span className="label">Rank</span>
             </div>
-            <div className="right locked-val">
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3.5" y="7" width="9" height="6.5" rx="1.6" />
-                <path d="M5.5 7V5.2a2.5 2.5 0 015 0V7" />
-              </svg>
-              Revealed at the closing ceremony
+            <div className="right">
+              {rankStatus.ranks_released && rankStatus.rank ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end' }}>
+                  {rankStatus.rank === 1 ? (
+                    <span style={{ fontSize: '20px' }}>🥇</span>
+                  ) : rankStatus.rank === 2 ? (
+                    <span style={{ fontSize: '20px' }}>🥈</span>
+                  ) : rankStatus.rank === 3 ? (
+                    <span style={{ fontSize: '20px' }}>🥉</span>
+                  ) : null}
+                  <span className="val" style={{ color: 'var(--gold)', fontWeight: 700, fontSize: '18px' }}>
+                    Rank #{rankStatus.rank}
+                  </span>
+                  {rankStatus.total_participants && (
+                    <span className="label" style={{ margin: 0, textTransform: 'none', color: 'var(--muted)' }}>
+                      of {rankStatus.total_participants}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="locked-val">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3.5" y="7" width="9" height="6.5" rx="1.6" />
+                    <path d="M5.5 7V5.2a2.5 2.5 0 015 0V7" />
+                  </svg>
+                  Revealed at the closing ceremony
+                </div>
+              )}
             </div>
           </div>
           <div className="final">

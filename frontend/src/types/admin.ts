@@ -262,6 +262,7 @@ export interface AdminLeaderboard {
   as_of: ISOTimestamp;
   version: number;
   is_event_ended?: boolean;
+  ranks_released?: boolean;
 }
 
 // ---------------------------------------------------------------------------

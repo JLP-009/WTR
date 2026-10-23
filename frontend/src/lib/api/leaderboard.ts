@@ -45,3 +45,27 @@ export async function getLeaderboard(currentParticipantId?: string): Promise<Lea
     };
   }
 }
+
+export interface ParticipantRankStatus {
+  ranks_released: boolean;
+  rank?: number;
+  total_participants?: number;
+}
+
+export async function getMyRankStatus(): Promise<ParticipantRankStatus> {
+  try {
+    const res = await api.get<{
+      data?: { rank: number };
+      total_participants?: number;
+      ranks_released?: boolean;
+    }>('/leaderboard/me');
+
+    return {
+      ranks_released: Boolean(res?.ranks_released),
+      rank: res?.data?.rank,
+      total_participants: res?.total_participants,
+    };
+  } catch {
+    return { ranks_released: false };
+  }
+}

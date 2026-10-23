@@ -417,3 +417,25 @@ export async function resetAdminTrades(): Promise<{ message: string }> {
     );
   }
 }
+
+export async function releaseRanks(): Promise<{ ranks_released: boolean }> {
+  try {
+    return await api.post('/admin/ranks/release', {});
+  } catch (err) {
+    throw new AdminApiError(
+      'INTERNAL_ERROR',
+      err instanceof Error ? err.message : 'Failed to release ranks'
+    );
+  }
+}
+
+export async function unreleaseRanks(): Promise<{ ranks_released: boolean }> {
+  try {
+    return await api.post('/admin/ranks/unrelease', {});
+  } catch (err) {
+    throw new AdminApiError(
+      'INTERNAL_ERROR',
+      err instanceof Error ? err.message : 'Failed to unrelease ranks'
+    );
+  }
+}

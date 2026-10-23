@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { RefreshCw, Play, Pause, Square, RotateCcw, Lock, Calendar, Trophy, ChevronRight } from 'lucide-react';
+import { RefreshCw, Play, Pause, Square, RotateCcw, Lock, Calendar, Trophy, ChevronRight, Radio, CheckCircle2 } from 'lucide-react';
+import { releaseRanks } from '../../../lib/api/admin';
 import type { AdminRoute } from '../../../admin/AdminApp';
 import StatusBadge from '../common/StatusBadge';
 import ConfirmDialog from '../common/ConfirmDialog';
@@ -31,6 +32,7 @@ export default function EventControlPage({ onNavigate }: { onNavigate?: (r: Admi
   const [actionError, setActionError] = useState('');
   const [dialog, setDialog] = useState<DialogType>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [ranksReleaseSuccess, setRanksReleaseSuccess] = useState('');
 
   // Idempotency keys — cached per command so retries use the same key
   const idk = useRef<Record<string, string>>({});
