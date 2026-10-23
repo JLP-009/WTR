@@ -36,6 +36,13 @@ function AppContent() {
   const { isAuthenticated, participant, logout } = useAuth();
   const [route, setRoute] = useState<Route>('dashboard');
   const [prevRoute, setPrevRoute] = useState<Route>('dashboard');
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
+    try {
+      return localStorage.getItem('wtr_last_selected_symbol') || 'NIFTY_50';
+    } catch {
+      return 'NIFTY_50';
+    }
+  });
   const [eventStatus, setEventStatus] = useState<string>('RUNNING');
 
   const checkStatus = () => {
@@ -131,7 +138,7 @@ function AppContent() {
           <PageContainer>
             {route === 'dashboard'   && <DashboardPage onNavigate={handleNavigate} />}
             {route === 'positions'   && <PositionsPage />}
-            {route === 'chart'       && <ChartPage />}
+            {route === 'chart'       && <ChartPage initialSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />}
             {route === 'pnl'         && <PnlPage />}
             {route === 'balance'     && <BalancePage />}
             {route === 'leaderboard' && <LeaderboardPage onBack={handleBack} />}

@@ -16,6 +16,14 @@ import LWChart from './LWChart';
 import FlipWarning from './FlipWarning';
 import ConfirmDialog from '../common/ConfirmDialog';
 
+const LAST_SYMBOL_KEY = 'wtr_last_selected_symbol';
+let inMemoryLastSymbol: string | null = null;
+
+export interface ChartPageProps {
+  initialSymbol?: string;
+  onSymbolChange?: (sym: string) => void;
+}
+
 function fmt(n: number) {
   return new Intl.NumberFormat('en-IN', {
     minimumFractionDigits: 2,
@@ -23,12 +31,26 @@ function fmt(n: number) {
   }).format(Math.abs(n));
 }
 
-export default function ChartPage() {
+export default function ChartPage({ initialSymbol, onSymbolChange }: ChartPageProps = {}) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
   const [tradableSymbols, setTradableSymbols] = useState<string[]>(TRADABLE_SYMBOLS);
-  const [symbol, setSymbol] = useState(TRADABLE_SYMBOLS[0]);
+  const [symbol, setSymbol] = useState<string>(() => {
+    if (initialSymbol) {
+      inMemoryLastSymbol = initialSymbol;
+      return initialSymbol;
+    }
+    if (inMemoryLastSymbol) return inMemoryLastSymbol;
+    try {
+      const saved = localStorage.getItem(LAST_SYMBOL_KEY);
+      if (saved && typeof saved === 'string') {
+        inMemoryLastSymbol = saved;
+        return saved;
+      }
+    } catch {}
+    return TRADABLE_SYMBOLS[0];
+  });
   const [market, setMarket] = useState<MarketState | null>(null);
   const [marketStatus, setMarketStatus] = useState<string>('OPEN');
   const [candles, setCandles] = useState<Candle[]>([]);
@@ -55,6 +77,16 @@ export default function ChartPage() {
   } | null>(null);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
+  const handleSelectSymbol = (s: string) => {
+    inMemoryLastSymbol = s;
+    try {
+      localStorage.setItem(LAST_SYMBOL_KEY, s);
+    } catch {}
+    setSymbol(s);
+    setSymbolOpen(false);
+    onSymbolChange?.(s);
+  };
+
   const currentPos = positions.find((p) => p.symbol === symbol) ?? null;
 
   useEffect(() => {
@@ -70,7 +102,15 @@ export default function ChartPage() {
         if (Array.isArray(instruments) && instruments.length > 0) {
           const syms = instruments.map((i) => i.symbol);
           setTradableSymbols(syms);
-          setSymbol((prev) => (syms.includes(prev) ? prev : syms[0]));
+          setSymbol((prev) => {
+            const saved = inMemoryLastSymbol || (typeof window !== 'undefined' ? localStorage.getItem(LAST_SYMBOL_KEY) : null);
+            const target = (saved && syms.includes(saved)) ? saved : (syms.includes(prev) ? prev : syms[0]);
+            inMemoryLastSymbol = target;
+            try {
+              localStorage.setItem(LAST_SYMBOL_KEY, target);
+            } catch {}
+            return target;
+          });
         }
       })
       .catch(() => {});
@@ -360,7 +400,7 @@ export default function ChartPage() {
                   key={s}
                   role="option"
                   aria-selected={s === symbol}
-                  onClick={() => { setSymbol(s); setSymbolOpen(false); }}
+                  onClick={() => handleSelectSymbol(s)}
                   className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
                     s === symbol
                       ? 'bg-[color:var(--surface-muted)] text-[color:var(--accent)] font-semibold'
