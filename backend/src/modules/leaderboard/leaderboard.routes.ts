@@ -176,16 +176,17 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
 
     const isRanksReleased = Boolean((activeEvent as any)?.ranksReleased);
 
-    // If event is ENDED and ranks are not released yet, hide details from non-admin participants
-    if (activeEvent?.status === 'ENDED' && !isRanksReleased && request.user?.role !== 'ADMIN') {
+    // By default, NEVER show rank to non-admin participants until admin explicitly releases ranks
+    if (!isRanksReleased && request.user?.role !== 'ADMIN') {
+      const list = await getLeaderboardData();
       return {
         data: {
           rank: null,
           ranks_released: false,
-          total_participants: 0,
+          total_participants: list.length,
         },
         request_id: request.requestId,
-        message: 'Trading event has ended. Ranks are not released yet.'
+        message: 'Ranks are not released yet.'
       };
     }
 
@@ -209,7 +210,7 @@ export const leaderboardRoutes: FastifyPluginAsync = async (app) => {
     return {
       data: {
         ...entryData,
-        rank: entryData.rank,
+        rank: isRanksReleased ? entryData.rank : null,
         ranks_released: isRanksReleased,
         total_participants: list.length,
       },

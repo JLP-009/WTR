@@ -150,7 +150,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
     await app.db
       .update(schema.events)
-      .set({ status: 'RUNNING', updatedAt: new Date() })
+      .set({ status: 'RUNNING', ranksReleased: false, updatedAt: new Date() })
       .where(eq(schema.events.id, event.id));
 
     await app.db
@@ -355,7 +355,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
     await app.db
       .update(schema.events)
-      .set({ status: 'ENDED', endedAt: new Date(), updatedAt: new Date() })
+      .set({ status: 'ENDED', ranksReleased: false, endedAt: new Date(), updatedAt: new Date() })
       .where(eq(schema.events.id, event.id));
 
     await app.db
@@ -451,6 +451,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     await app.db.execute(sql`
       UPDATE events
       SET status = 'SETUP',
+          ranks_released = FALSE,
           ended_at = NULL,
           updated_at = NOW();
     `);
