@@ -130,16 +130,7 @@ export class AuthService {
       throw new AppError('FORBIDDEN', 403, 'Administrator credentials cannot be reset through the public recovery form. Please contact system operations.');
     }
 
-    // Verify Device Fingerprint for participant account
-    if (user.role === 'PARTICIPANT' && user.registeredDeviceId && req.device_id) {
-      if (user.registeredDeviceId !== req.device_id) {
-        throw new AppError(
-          'UNAUTHORIZED_DEVICE',
-          403,
-          'Access Denied: Password reset is only permitted from the phone/device on which this account was registered.'
-        );
-      }
-    }
+    // Device Fingerprinting check removed: allow password reset from any device (phone, laptop) as long as identity is verified below
 
     // Verify first or last name matches display name for identity verification
     const actualName = user.displayName.trim().toLowerCase();
@@ -245,23 +236,13 @@ export class AuthService {
       throw new AppError('AUTHENTICATION_FAILED', 401, 'Invalid participant ID or password.');
     }
 
-    // Device Fingerprinting & Binding Check for participants (Admin is exempt)
-    if (user.role === 'PARTICIPANT' && req.device_id) {
-      if (user.registeredDeviceId) {
-        if (user.registeredDeviceId !== req.device_id) {
-          throw new AppError(
-            'UNAUTHORIZED_DEVICE',
-            403,
-            'Access Denied: This account is locked to another phone/device. Logins from unauthorized devices are blocked.'
-          );
-        }
-      } else {
-        // Automatically bind this first successful login device to the account
-        await this.db
-          .update(schema.users)
-          .set({ registeredDeviceId: req.device_id, updatedAt: new Date() })
-          .where(eq(schema.users.id, user.id));
-      }
+    // Seamless multi-device access: Allow participants to log in from phone, laptop, or tablet.
+    // Update latest active device ID without blocking logins from new devices.
+    if (user.role === 'PARTICIPANT' && req.device_id && user.registeredDeviceId !== req.device_id) {
+      await this.db
+        .update(schema.users)
+        .set({ registeredDeviceId: req.device_id, updatedAt: new Date() })
+        .where(eq(schema.users.id, user.id));
     }
 
     const tokenPayload: TokenPayload = {
