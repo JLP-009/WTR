@@ -144,9 +144,9 @@ export default function PnlPage() {
               color={(portfolio.unrealizedPnl ?? 0) >= 0 ? 'success' : 'danger'}
             />
             <StatRow
-              label="Today's P&L"
-              value={`${(portfolio.todayPnl ?? 0) >= 0 ? '+' : '−'}₹${fmt(portfolio.todayPnl ?? 0)}`}
-              color={(portfolio.todayPnl ?? 0) >= 0 ? 'success' : 'danger'}
+              label="Total P&L"
+              value={`${(portfolio.totalPnl ?? 0) >= 0 ? '+' : '−'}₹${fmt(portfolio.totalPnl ?? 0)}`}
+              color={(portfolio.totalPnl ?? 0) >= 0 ? 'success' : 'danger'}
             />
           </div>
         </>

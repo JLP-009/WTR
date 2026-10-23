@@ -6,7 +6,7 @@ import { SkeletonCard } from '../common/LoadingState';
 import ErrorState from '../common/ErrorState';
 
 function fmt(n: number) {
-  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n || 0);
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Math.abs(n || 0));
 }
 
 interface BalanceRowProps {
@@ -81,8 +81,8 @@ export default function BalancePage() {
             <p className="text-2xl sm:text-3xl md:text-4xl font-bold tabular-nums text-[color:var(--foreground)] truncate">
               ₹{fmt(portfolio.portfolioValue ?? 1000000)}
             </p>
-            <p className="text-sm tabular-nums text-[color:var(--success)] mt-1.5 font-medium">
-              +{(portfolio.totalReturn ?? 0).toFixed(2)}% total return
+            <p className={`text-sm tabular-nums mt-1.5 font-medium ${(portfolio.totalReturn ?? 0) < 0 ? 'text-[color:var(--danger)]' : 'text-[color:var(--success)]'}`}>
+              {(portfolio.totalReturn ?? 0) < 0 ? '−' : '+'}{Math.abs(portfolio.totalReturn ?? 0).toFixed(2)}% total return
             </p>
           </div>
 
@@ -92,8 +92,8 @@ export default function BalancePage() {
             <BalanceRow label="Invested Value" value={`₹${fmt(portfolio.investedValue ?? 0)}`} prominent />
             <BalanceRow
               label="Total Return"
-              value={`+${(portfolio.totalReturn ?? 0).toFixed(2)}%`}
-              valueColor="success"
+              value={`${(portfolio.totalReturn ?? 0) < 0 ? '−' : '+'}${Math.abs(portfolio.totalReturn ?? 0).toFixed(2)}%`}
+              valueColor={(portfolio.totalReturn ?? 0) < 0 ? 'danger' : 'success'}
             />
           </div>
         </>

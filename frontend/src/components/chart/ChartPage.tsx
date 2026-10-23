@@ -249,6 +249,7 @@ export default function ChartPage() {
       const res = await submitOrder({ symbol, side, quantity: qty });
       if (res.status === 'ACCEPTED') {
         setOrderSuccess(res.message);
+        setOrderQty('1');
         setTimeout(() => setOrderSuccess(''), 3000);
         // Refresh positions in background without blocking UI
         loadPositions();
@@ -280,6 +281,7 @@ export default function ChartPage() {
       const res = await submitOrder({ symbol: closedSymbol, side: 'CLOSE', quantity: closedQty });
       if (res.status === 'ACCEPTED') {
         setOrderSuccess(`Position for ${closedSymbol} closed successfully.`);
+        setOrderQty('1');
         setTimeout(() => setOrderSuccess(''), 4000);
         // Clear closed position from local state
         setPositions((prev) => prev.filter((p) => p.symbol !== closedSymbol));

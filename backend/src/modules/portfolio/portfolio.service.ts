@@ -141,7 +141,7 @@ export class PortfolioService {
       buying_power: availableCash.toFixed(2),
       realized_pnl: realizedPnl.toFixed(2),
       unrealized_pnl: totalUnrealizedPnl.toFixed(2),
-      daily_pnl: dailyPnl.toFixed(2),
+      daily_pnl: totalPnl.toFixed(2),
       total_pnl: totalPnl.toFixed(2),
     };
   }
