@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Wallet } from 'lucide-react';
 import { api } from '../../lib/api/client';
 import { getMarketState, getMarketData } from '../../lib/api/market';
 import { getPositions } from '../../lib/api/positions';
 import { submitOrder } from '../../lib/api/orders';
+import { getPortfolioSummary, normalizePortfolioSummary } from '../../lib/api/portfolio';
 import type { MarketState } from '../../contracts/v1/market';
 import type { Candle } from '../../contracts/v1/market';
 import type { Position } from '../../contracts/v1/positions';
@@ -181,6 +182,36 @@ export default function ChartPage() {
   }, []);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [availableCash, setAvailableCash] = useState<number | null>(null);
+
+  const loadPortfolio = useCallback(async () => {
+    try {
+      const p = await getPortfolioSummary();
+      if (p && typeof p.availableCash === 'number') {
+        setAvailableCash(p.availableCash);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadPortfolio();
+    const unsubPort = wsClient.subscribe('portfolio', (payload: any) => {
+      const data = payload?.data || payload;
+      if (data) {
+        const norm = normalizePortfolioSummary(data);
+        setAvailableCash(norm.availableCash);
+      } else {
+        loadPortfolio();
+      }
+    });
+    const unsubOrders = wsClient.subscribe('orders', () => {
+      loadPortfolio();
+    });
+    return () => {
+      unsubPort();
+      unsubOrders();
+    };
+  }, [loadPortfolio]);
 
   const handleOrder = (side: 'BUY' | 'SELL') => {
     if (isSubmitting) return;
@@ -467,14 +498,27 @@ export default function ChartPage() {
             ))}
           </div>
 
-          {/* Estimated Value Display */}
-          <div className="flex items-center justify-between px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-[color:var(--surface-muted)]/60 border border-[color:var(--border)] w-full min-w-0">
-            <span className="text-xs text-[color:var(--foreground-muted)] font-medium">
-              Estimated Value
-            </span>
-            <span className="text-xs font-mono font-bold tabular-nums text-[color:var(--foreground)]">
-              {market ? `₹${fmt(parseFloat(orderQty || '0') * market.ltp)}` : '—'}
-            </span>
+          {/* Estimated Value & Available Cash Summary */}
+          <div className="rounded-xl bg-[color:var(--surface-muted)]/50 border border-[color:var(--border)] divide-y divide-[color:var(--border)]/60 w-full min-w-0">
+            <div className="flex items-center justify-between px-3.5 py-2">
+              <span className="text-xs text-[color:var(--foreground-muted)] font-medium">
+                Estimated Value
+              </span>
+              <span className="text-xs font-mono font-bold tabular-nums text-[color:var(--foreground)] truncate ml-2">
+                {market ? `₹${fmt(parseFloat(orderQty || '0') * market.ltp)}` : '—'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between px-3.5 py-2">
+              <div className="flex items-center gap-1.5">
+                <Wallet size={13} className="text-[color:var(--accent)] shrink-0" />
+                <span className="text-xs text-[color:var(--foreground-muted)] font-medium">
+                  Available Cash
+                </span>
+              </div>
+              <span className="text-xs font-mono font-bold tabular-nums text-[color:var(--foreground)] truncate ml-2">
+                {availableCash !== null ? `₹${fmt(availableCash)}` : '—'}
+              </span>
+            </div>
           </div>
         </div>
 
