@@ -521,21 +521,23 @@ export default function ChartPage({ initialSymbol, onSymbolChange }: ChartPagePr
             </button>
           </div>
 
-          {/* Quick Quantity Presets */}
+          {/* Quick Quantity Add Buttons (+1, +5, +10, +25, +50) */}
           <div className="grid grid-cols-5 gap-1.5 pt-0.5 w-full min-w-0">
             {[1, 5, 10, 25, 50].map((preset) => (
               <button
                 key={preset}
                 type="button"
                 disabled={marketStatus !== 'OPEN'}
-                onClick={() => setOrderQty(preset.toString())}
-                className={`h-7 text-xs font-mono font-semibold rounded-lg border transition-all flex items-center justify-center ${
-                  orderQty === preset.toString()
-                    ? 'border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-[color:var(--accent)] font-bold shadow-xs'
-                    : 'border-[color:var(--border)] bg-[color:var(--surface-muted)] text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)] hover:border-[color:var(--border-strong)]'
-                } disabled:opacity-40 disabled:cursor-not-allowed`}
+                onClick={() => {
+                  setOrderQty((prev) => {
+                    const current = parseInt(prev || '0', 10);
+                    const validCurrent = isNaN(current) || current < 0 ? 0 : current;
+                    return (validCurrent + preset).toString();
+                  });
+                }}
+                className="h-7 text-xs font-mono font-semibold rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-muted)] text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)] hover:border-[color:var(--border-strong)] active:scale-95 active:bg-[color:var(--accent)]/15 active:text-[color:var(--accent)] transition-all flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed select-none"
               >
-                {preset}
+                +{preset}
               </button>
             ))}
           </div>
