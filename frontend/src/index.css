@@ -94,6 +94,16 @@ body,
   outline-offset: 2px;
 }
 
+/* Hide number input spinners globally to prevent layout overflow */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
 /* Transitions */
 .theme-transition,
 .theme-transition * {

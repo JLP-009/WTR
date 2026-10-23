@@ -401,7 +401,7 @@ export default function ChartPage() {
       )}
 
       {/* Order panel */}
-      <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-2xl p-4 space-y-4 shadow-sm">
+      <div className="bg-[color:var(--surface)] border border-[color:var(--border)] rounded-2xl p-3.5 sm:p-4 space-y-3.5 sm:space-y-4 shadow-sm w-full min-w-0 overflow-hidden">
         {/* Quantity Section: Label -> Input Box -> Estimated Value */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -414,38 +414,61 @@ export default function ChartPage() {
           </div>
 
           {/* Quantity Stepper & Input Box */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 w-full min-w-0">
             <button
               type="button"
               disabled={marketStatus !== 'OPEN' || parseInt(orderQty || '1', 10) <= 1}
               onClick={() => setOrderQty((prev) => Math.max(1, (parseInt(prev || '1', 10) - 1)).toString())}
-              className="w-10 h-11 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] text-[color:var(--foreground)] font-bold text-lg hover:bg-[color:var(--surface-elevated)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shrink-0"
+              className="w-10 sm:w-11 h-11 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] text-[color:var(--foreground)] font-bold text-lg hover:bg-[color:var(--surface-elevated)] active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shrink-0 select-none"
+              aria-label="Decrease quantity"
             >
               −
             </button>
-            <input
-              id="order-quantity-input"
-              type="number"
-              min="1"
-              disabled={marketStatus !== 'OPEN'}
-              value={orderQty}
-              onChange={(e) => setOrderQty(e.target.value)}
-              aria-label="Order quantity"
-              placeholder="Quantity"
-              className="flex-1 h-11 px-4 text-center rounded-xl border-2 border-[color:var(--border)] bg-[color:var(--background)] text-base font-mono font-bold tabular-nums text-[color:var(--foreground)] focus:outline-none focus:border-[color:var(--accent)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            />
+            <div className="flex-1 min-w-0 relative">
+              <input
+                id="order-quantity-input"
+                type="number"
+                min="1"
+                disabled={marketStatus !== 'OPEN'}
+                value={orderQty}
+                onChange={(e) => setOrderQty(e.target.value)}
+                aria-label="Order quantity"
+                placeholder="1"
+                className="w-full min-w-0 h-11 px-2 text-center rounded-xl border-2 border-[color:var(--border)] bg-[color:var(--background)] text-base font-mono font-bold tabular-nums text-[color:var(--foreground)] focus:outline-none focus:border-[color:var(--accent)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </div>
             <button
               type="button"
               disabled={marketStatus !== 'OPEN'}
               onClick={() => setOrderQty((prev) => (parseInt(prev || '0', 10) + 1).toString())}
-              className="w-10 h-11 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] text-[color:var(--foreground)] font-bold text-lg hover:bg-[color:var(--surface-elevated)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shrink-0"
+              className="w-10 sm:w-11 h-11 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface-muted)] text-[color:var(--foreground)] font-bold text-lg hover:bg-[color:var(--surface-elevated)] active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center shrink-0 select-none"
+              aria-label="Increase quantity"
             >
               +
             </button>
           </div>
 
+          {/* Quick Quantity Presets */}
+          <div className="grid grid-cols-5 gap-1.5 pt-0.5 w-full min-w-0">
+            {[1, 5, 10, 25, 50].map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                disabled={marketStatus !== 'OPEN'}
+                onClick={() => setOrderQty(preset.toString())}
+                className={`h-7 text-xs font-mono font-semibold rounded-lg border transition-all flex items-center justify-center ${
+                  orderQty === preset.toString()
+                    ? 'border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-[color:var(--accent)] font-bold shadow-xs'
+                    : 'border-[color:var(--border)] bg-[color:var(--surface-muted)] text-[color:var(--foreground-muted)] hover:text-[color:var(--foreground)] hover:border-[color:var(--border-strong)]'
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+
           {/* Estimated Value Display */}
-          <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[color:var(--surface-muted)]/60 border border-[color:var(--border)]">
+          <div className="flex items-center justify-between px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-[color:var(--surface-muted)]/60 border border-[color:var(--border)] w-full min-w-0">
             <span className="text-xs text-[color:var(--foreground-muted)] font-medium">
               Estimated Value
             </span>
@@ -456,18 +479,18 @@ export default function ChartPage() {
         </div>
 
         {/* Action Buttons: Solid Green Buy, Solid Red Sell */}
-        <div className="flex gap-3 pt-1">
+        <div className="flex items-center gap-2 sm:gap-3 pt-1 w-full min-w-0">
           <button
             disabled={marketStatus !== 'OPEN' || isSubmitting}
             onClick={() => handleOrder('BUY')}
-            className="flex-1 h-11 rounded-xl text-xs font-black tracking-widest uppercase bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white shadow-md hover:shadow-emerald-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-1.5"
+            className="flex-1 min-w-0 h-11 rounded-xl text-xs font-black tracking-widest uppercase bg-emerald-600 hover:bg-emerald-500 active:scale-[0.98] text-white shadow-md hover:shadow-emerald-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-1.5"
           >
             <span>{isSubmitting ? '...' : 'Buy'}</span>
           </button>
           <button
             disabled={marketStatus !== 'OPEN' || isSubmitting}
             onClick={() => handleOrder('SELL')}
-            className="flex-1 h-11 rounded-xl text-xs font-black tracking-widest uppercase bg-rose-600 hover:bg-rose-500 active:scale-[0.98] text-white shadow-md hover:shadow-rose-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-1.5"
+            className="flex-1 min-w-0 h-11 rounded-xl text-xs font-black tracking-widest uppercase bg-rose-600 hover:bg-rose-500 active:scale-[0.98] text-white shadow-md hover:shadow-rose-600/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-1.5"
           >
             <span>{isSubmitting ? '...' : 'Sell'}</span>
           </button>
@@ -476,7 +499,7 @@ export default function ChartPage() {
               disabled={marketStatus !== 'OPEN'}
               onClick={handleClose}
               aria-label={`Close ${currentPos.side} position`}
-              className="px-4 h-11 rounded-xl text-xs font-bold tracking-wider uppercase border border-[color:var(--border-strong)] bg-[color:var(--surface-muted)] text-[color:var(--foreground)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              className="px-3 sm:px-4 h-11 rounded-xl text-xs font-bold tracking-wider uppercase border border-[color:var(--border-strong)] bg-[color:var(--surface-muted)] text-[color:var(--foreground)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
             >
               Close
             </button>
