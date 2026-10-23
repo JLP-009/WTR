@@ -1,4 +1,4 @@
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { Decimal } from 'decimal.js';
 import type { Database } from '../../db/client.js';
@@ -6,6 +6,7 @@ import * as schema from '../../db/schema/index.js';
 import type { WebSocketGateway } from '../websocket/websocket.gateway.js';
 import type { Environment } from '../../config/env.js';
 import { livePriceCache } from '../market/price-cache.js';
+import { MarketService } from '../market/market.service.js';
 
 export class SimulationWorker {
   private timer: NodeJS.Timeout | null = null;
@@ -328,65 +329,164 @@ export class SimulationWorker {
         const nextInterval = currentInterval + 1;
 
         if (nextInterval >= 72) {
-          // 12-minute trading day session completed! Close the day and pause for Admin.
-          await this.db
-            .update(schema.simulationStates)
-            .set({
-              dayStatus: 'CLOSED',
-              marketStatus: 'CLOSED',
-              intervalIndex: 71,
-              lastCommittedAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.simulationStates.eventId, activeEvent.id));
+          // Determine if this is the final simulation day or end of dataset
+          const totalDays = activeEvent.totalSimulationDays || 20;
+          let isFinalDay = currentDay >= totalDays;
 
-          // Post official News item in DB
-          try {
-            const [adminUser] = await this.db
-              .select({ id: schema.users.id })
-              .from(schema.users)
-              .where(eq(schema.users.role, 'ADMIN'))
-              .limit(1);
-
-            const newsPublicId = `news_${randomUUID()}`;
-            const title = `🔔 Trading Day ${currentDay} Ended — Market Closed`;
-            const body = `Trading Day ${currentDay} (12-minute session) has officially closed. All intraday orders are finalized. Waiting for Admin announcements before Day ${currentDay + 1} begins.`;
-
-            const [newsItem] = await this.db
-              .insert(schema.news)
-              .values({
-                publicId: newsPublicId,
-                authorUserId: adminUser?.id,
-                type: 'CRITICAL',
-                title,
-                body,
-                audience: 'ALL_PARTICIPANTS',
-              })
-              .returning();
-
-            // Broadcast to all Traders and Admin via WebSocket
-            this.wsGateway.broadcast('market_status', {
-              status: 'CLOSED',
-              day_status: 'CLOSED',
-              simulation_day: currentDay,
-              event_status: 'RUNNING',
-              message: `Trading Day ${currentDay} has concluded. Market is now CLOSED.`,
-            });
-
-            if (newsItem) {
-              this.wsGateway.broadcast('news', {
-                news_id: newsItem.publicId,
-                type: newsItem.type,
-                title: newsItem.title,
-                body: newsItem.body,
-                published_at: newsItem.publishedAt.toISOString(),
-              });
+          if (!isFinalDay) {
+            try {
+              const [maxCandle] = await this.db
+                .select({ maxDay: sql<number>`MAX(${schema.datasetCandles.tradingDay})` })
+                .from(schema.datasetCandles)
+                .where(activeEvent.datasetId ? eq(schema.datasetCandles.datasetId, activeEvent.datasetId) : undefined);
+              if (maxCandle?.maxDay && currentDay >= Number(maxCandle.maxDay)) {
+                isFinalDay = true;
+              }
+            } catch {
+              // fallback to totalDays
             }
+          }
 
-            // Compute and save leaderboard snapshot at day close
-            await this.computeLeaderboardSnapshot(activeEvent.id, currentDay);
-          } catch (err) {
-            console.error('[SimWorker] Day-close processing error:', err);
+          if (isFinalDay) {
+            // === AUTO-END EVENT AT CONCLUSION OF FINAL DAY / DATASET ===
+            console.log(`[SimWorker] Final Day ${currentDay} market closed. Automatically ending tournament event.`);
+
+            await this.db
+              .update(schema.events)
+              .set({
+                status: 'ENDED',
+                ranksReleased: false,
+                endedAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.events.id, activeEvent.id));
+
+            await this.db
+              .update(schema.simulationStates)
+              .set({
+                status: 'STOPPED',
+                dayStatus: 'CLOSED',
+                marketStatus: 'CLOSED',
+                intervalIndex: 71,
+                lastCommittedAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.simulationStates.eventId, activeEvent.id));
+
+            MarketService.clearCache();
+
+            try {
+              const [adminUser] = await this.db
+                .select({ id: schema.users.id })
+                .from(schema.users)
+                .where(eq(schema.users.role, 'ADMIN'))
+                .limit(1);
+
+              const newsPublicId = `news_${randomUUID()}`;
+              const title = `🏆 Trading Event Ended — Final Rankings Being Processed`;
+              const body = `Trading Day ${currentDay} has concluded and all market sessions are officially closed. All portfolios have been settled mark-to-market. Official final rankings will be released shortly!`;
+
+              const [newsItem] = await this.db
+                .insert(schema.news)
+                .values({
+                  publicId: newsPublicId,
+                  authorUserId: adminUser?.id,
+                  type: 'CRITICAL',
+                  title,
+                  body,
+                  audience: 'ALL_PARTICIPANTS',
+                })
+                .returning();
+
+              // Compute and save final snapshot
+              await this.computeLeaderboardSnapshot(activeEvent.id, currentDay);
+
+              // Broadcast final ENDED status to all participants and admin
+              this.wsGateway.broadcast('market_status', {
+                status: 'CLOSED',
+                day_status: 'CLOSED',
+                simulation_day: currentDay,
+                event_status: 'ENDED',
+                message: 'The trading event has officially ended. Thank you for participating!',
+              });
+
+              this.wsGateway.broadcast('event', {
+                event_id: activeEvent.id,
+                status: 'ENDED',
+              });
+
+              if (newsItem) {
+                this.wsGateway.broadcast('news', {
+                  news_id: newsItem.publicId,
+                  type: newsItem.type,
+                  title: newsItem.title,
+                  body: newsItem.body,
+                  published_at: newsItem.publishedAt.toISOString(),
+                });
+              }
+            } catch (err) {
+              console.error('[SimWorker] Final day auto-end processing error:', err);
+            }
+          } else {
+            // === REGULAR INTERMEDIATE DAY CLOSE (PAUSE FOR ADMIN) ===
+            await this.db
+              .update(schema.simulationStates)
+              .set({
+                dayStatus: 'CLOSED',
+                marketStatus: 'CLOSED',
+                intervalIndex: 71,
+                lastCommittedAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.simulationStates.eventId, activeEvent.id));
+
+            try {
+              const [adminUser] = await this.db
+                .select({ id: schema.users.id })
+                .from(schema.users)
+                .where(eq(schema.users.role, 'ADMIN'))
+                .limit(1);
+
+              const newsPublicId = `news_${randomUUID()}`;
+              const title = `🔔 Trading Day ${currentDay} Ended — Market Closed`;
+              const body = `Trading Day ${currentDay} (12-minute session) has officially closed. All intraday orders are finalized. Waiting for Admin announcements before Day ${currentDay + 1} begins.`;
+
+              const [newsItem] = await this.db
+                .insert(schema.news)
+                .values({
+                  publicId: newsPublicId,
+                  authorUserId: adminUser?.id,
+                  type: 'CRITICAL',
+                  title,
+                  body,
+                  audience: 'ALL_PARTICIPANTS',
+                })
+                .returning();
+
+              // Broadcast to all Traders and Admin via WebSocket
+              this.wsGateway.broadcast('market_status', {
+                status: 'CLOSED',
+                day_status: 'CLOSED',
+                simulation_day: currentDay,
+                event_status: 'RUNNING',
+                message: `Trading Day ${currentDay} has concluded. Market is now CLOSED.`,
+              });
+
+              if (newsItem) {
+                this.wsGateway.broadcast('news', {
+                  news_id: newsItem.publicId,
+                  type: newsItem.type,
+                  title: newsItem.title,
+                  body: newsItem.body,
+                  published_at: newsItem.publishedAt.toISOString(),
+                });
+              }
+
+              // Compute and save leaderboard snapshot at day close
+              await this.computeLeaderboardSnapshot(activeEvent.id, currentDay);
+            } catch (err) {
+              console.error('[SimWorker] Day-close processing error:', err);
+            }
           }
         } else {
           await this.db
