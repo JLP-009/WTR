@@ -14,6 +14,7 @@ import BalancePage from './components/balance/BalancePage';
 import LeaderboardPage from './components/leaderboard/LeaderboardPage';
 import AdminApp from './admin/AdminApp';
 import EventEndedThankYou from './components/common/EventEndedThankYou';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import { getMarketStatus } from './lib/api/market';
 import { wsClient } from './lib/websocket';
 

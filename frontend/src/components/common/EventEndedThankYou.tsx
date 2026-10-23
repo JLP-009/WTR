@@ -29,27 +29,57 @@ export default function EventEndedThankYou({
   const [submittedAt] = useState(() =>
     new Date().toLocaleTimeString('en-GB', { hour12: false })
   );
+  const [rankStatus, setRankStatus] = useState<ParticipantRankStatus>({ ranks_released: false });
+
+  const fetchRank = async () => {
+    try {
+      const res = await getMyRankStatus();
+      if (res) {
+        setRankStatus(res);
+      }
+      return res;
+    } catch {
+      return { ranks_released: false };
+    }
+  };
 
   useEffect(() => {
     getPortfolioSummary()
       .then((p) => setPortfolio(p))
       .catch(() => {});
+    fetchRank();
+
+    const unsubRanks = wsClient.subscribe('ranks_released', (payload: any) => {
+      if (payload?.ranks_released) {
+        fetchRank();
+      } else {
+        setRankStatus({ ranks_released: false });
+      }
+    });
+
+    return () => unsubRanks();
   }, []);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
     if (onRefresh) onRefresh();
 
-    getPortfolioSummary()
-      .then((p) => setPortfolio(p))
-      .catch(() => {})
-      .finally(() => {
-        setTimeout(() => {
-          setIsRefreshing(false);
-          const t = new Date().toLocaleTimeString('en-GB', { hour12: false });
-          setLiveMsg(`Checked at ${t}. Rank not released yet.`);
-        }, 1100);
-      });
+    Promise.all([
+      getPortfolioSummary().then(setPortfolio).catch(() => {}),
+      fetchRank(),
+    ]).finally(() => {
+      setTimeout(() => {
+        setIsRefreshing(false);
+        const t = new Date().toLocaleTimeString('en-GB', { hour12: false });
+        fetchRank().then((res) => {
+          if (res?.ranks_released && res?.rank) {
+            setLiveMsg(`Checked at ${t}. Official Rank #${res.rank} of ${res.total_participants || 0}!`);
+          } else {
+            setLiveMsg(`Checked at ${t}. Rank not released yet.`);
+          }
+        });
+      }, 900);
+    });
   };
 
   // Portfolio calculations
