@@ -52,7 +52,7 @@ export async function closePosition(req: ClosePositionRequest): Promise<ClosePos
     };
   } catch (err: any) {
     if (err instanceof TypeError && err.message.includes('fetch')) {
-      return mockClosePosition(req);
+      return { success: false, message: 'Network connection lost. Position was not closed.' };
     }
     return {
       success: false,

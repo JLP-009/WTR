@@ -836,46 +836,42 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  // Participant Management
+  // Participant Management (Optimized batch queries)
   app.get('/participants', async (request) => {
-    const users = await app.db
-      .select()
-      .from(schema.users)
-      .orderBy(desc(schema.users.createdAt));
+    const [users, allPortfolios, orderCounts, positionCounts] = await Promise.all([
+      app.db.select().from(schema.users).orderBy(desc(schema.users.createdAt)),
+      app.db.select().from(schema.portfolios),
+      app.db
+        .select({ userId: schema.orders.userId, count: count() })
+        .from(schema.orders)
+        .groupBy(schema.orders.userId),
+      app.db
+        .select({ userId: schema.positions.userId, count: count() })
+        .from(schema.positions)
+        .where(sql`${schema.positions.quantity} > 0`)
+        .groupBy(schema.positions.userId),
+    ]);
 
-    const participants = await Promise.all(
-      users.map(async (u) => {
-        const [portfolio] = await app.db
-          .select()
-          .from(schema.portfolios)
-          .where(eq(schema.portfolios.userId, u.id))
-          .limit(1);
+    const portfolioMap = new Map(allPortfolios.map((p) => [p.userId, p]));
+    const orderCountMap = new Map(orderCounts.map((o) => [o.userId, Number(o.count)]));
+    const posCountMap = new Map(positionCounts.map((p) => [p.userId, Number(p.count)]));
 
-        const [ordersCnt] = await app.db
-          .select({ count: count() })
-          .from(schema.orders)
-          .where(eq(schema.orders.userId, u.id));
-
-        const [positionsCnt] = await app.db
-          .select({ count: count() })
-          .from(schema.positions)
-          .where(sql`${schema.positions.userId} = ${u.id} AND ${schema.positions.quantity} > 0`);
-
-        return {
-          participant_id: u.participantId,
-          display_name: u.displayName,
-          status: u.accountStatus,
-          created_at: u.createdAt.toISOString(),
-          balance: portfolio?.availableCash || '1000000.00',
-          equity: portfolio?.availableCash || '1000000.00',
-          realized_pnl: portfolio?.realizedPnl || '0.00',
-          unrealized_pnl: '0.00',
-          total_orders: Number(ordersCnt?.count || 0),
-          open_positions: Number(positionsCnt?.count || 0),
-          rank: 1,
-        };
-      })
-    );
+    const participants = users.map((u) => {
+      const portfolio = portfolioMap.get(u.id);
+      return {
+        participant_id: u.participantId,
+        display_name: u.displayName,
+        status: u.accountStatus,
+        created_at: u.createdAt.toISOString(),
+        balance: portfolio?.availableCash || '1000000.00',
+        equity: portfolio?.availableCash || '1000000.00',
+        realized_pnl: portfolio?.realizedPnl || '0.00',
+        unrealized_pnl: '0.00',
+        total_orders: orderCountMap.get(u.id) || 0,
+        open_positions: posCountMap.get(u.id) || 0,
+        rank: 1,
+      };
+    });
 
     return {
       data: participants,

@@ -219,12 +219,25 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
               <p className="text-[10px] font-medium uppercase tracking-widest text-[color:var(--foreground-muted)] mb-2">
                 Rank
               </p>
-              <p className="text-2xl font-bold text-[color:var(--accent)] tabular-nums leading-none">
-                #{rank.current}
-              </p>
-              <p className="text-xs text-[color:var(--foreground-muted)] mt-1">
-                of {rank.total.toLocaleString('en-IN')}
-              </p>
+              {rank && rank.current > 0 && rank.total > 0 ? (
+                <>
+                  <p className="text-2xl font-bold text-[color:var(--accent)] tabular-nums leading-none">
+                    #{rank.current}
+                  </p>
+                  <p className="text-xs text-[color:var(--foreground-muted)] mt-1">
+                    of {rank.total.toLocaleString('en-IN')}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-2xl font-bold text-[color:var(--foreground-muted)] tabular-nums leading-none">
+                    —
+                  </p>
+                  <p className="text-xs text-[color:var(--foreground-muted)] mt-1">
+                    Unranked
+                  </p>
+                </>
+              )}
             </button>
           </div>
 

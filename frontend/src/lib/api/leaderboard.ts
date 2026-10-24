@@ -32,14 +32,14 @@ export async function getLeaderboard(currentParticipantId?: string): Promise<Lea
 
     return {
       totalParticipants: entries.length,
-      currentUserRank: myEntry?.rank || 1,
+      currentUserRank: myEntry ? myEntry.rank : 0,
       season: 'Season 01',
       entries,
     };
   } catch {
     return {
       totalParticipants: 0,
-      currentUserRank: 1,
+      currentUserRank: 0,
       season: 'Season 01',
       entries: [],
     };
