@@ -220,36 +220,55 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     return { data: { status: 'RUNNING' }, request_id: request.requestId };
   });
 
-  const calculateFinalPortfoliosAndLeaderboard = async (eventId: string) => {
-    // 1. Fetch all participants with their portfolios
-    const users = await app.db
-      .select({
-        userId: schema.users.id,
-        publicId: schema.users.publicId,
-        participantId: schema.users.participantId,
-        displayName: schema.users.displayName,
-        portfolioId: schema.portfolios.id,
-        startingCapital: schema.portfolios.startingCapital,
-        availableCash: schema.portfolios.availableCash,
-        reservedCash: schema.portfolios.reservedCash,
-        realizedPnl: schema.portfolios.realizedPnl,
-      })
-      .from(schema.users)
-      .innerJoin(schema.portfolios, eq(schema.users.id, schema.portfolios.userId))
-      .where(eq(schema.users.role, 'PARTICIPANT'));
+  let cachedAdminLeaderboard: {
+    eventId: string;
+    data: any;
+    expiresAt: number;
+  } | null = null;
 
-    // 2. Fetch all open positions with instrument info
-    const allPositions = await app.db
-      .select({
-        userId: schema.positions.userId,
-        symbol: schema.instruments.symbol,
-        side: schema.positions.side,
-        quantity: schema.positions.quantity,
-        averageEntryPrice: schema.positions.averageEntryPrice,
-      })
-      .from(schema.positions)
-      .innerJoin(schema.instruments, eq(schema.positions.instrumentId, schema.instruments.id))
-      .where(eq(schema.positions.eventId, eventId));
+  const calculateFinalPortfoliosAndLeaderboard = async (eventId: string, persistToDb = false) => {
+    // 1. Fetch participants, positions, and order counts in PARALLEL
+    const [users, allPositions, tradeCounts] = await Promise.all([
+      app.db
+        .select({
+          userId: schema.users.id,
+          publicId: schema.users.publicId,
+          participantId: schema.users.participantId,
+          displayName: schema.users.displayName,
+          portfolioId: schema.portfolios.id,
+          startingCapital: schema.portfolios.startingCapital,
+          availableCash: schema.portfolios.availableCash,
+          reservedCash: schema.portfolios.reservedCash,
+          realizedPnl: schema.portfolios.realizedPnl,
+        })
+        .from(schema.users)
+        .innerJoin(schema.portfolios, eq(schema.users.id, schema.portfolios.userId))
+        .where(eq(schema.users.role, 'PARTICIPANT')),
+      app.db
+        .select({
+          userId: schema.positions.userId,
+          symbol: schema.instruments.symbol,
+          side: schema.positions.side,
+          quantity: schema.positions.quantity,
+          averageEntryPrice: schema.positions.averageEntryPrice,
+        })
+        .from(schema.positions)
+        .innerJoin(schema.instruments, eq(schema.positions.instrumentId, schema.instruments.id))
+        .where(eq(schema.positions.eventId, eventId)),
+      app.db
+        .select({
+          userId: schema.orders.userId,
+          count: count(),
+        })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.eventId, eventId),
+            eq(schema.orders.status, 'FILLED')
+          )
+        )
+        .groupBy(schema.orders.userId),
+    ]);
 
     const positionsByUser = new Map<string, typeof allPositions>();
     for (const pos of allPositions) {
@@ -258,28 +277,15 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       positionsByUser.set(pos.userId, existing);
     }
 
-    // 3. Count filled orders per user
-    const tradeCounts = await app.db
-      .select({
-        userId: schema.orders.userId,
-        count: count(),
-      })
-      .from(schema.orders)
-      .where(
-        and(
-          eq(schema.orders.eventId, eventId),
-          eq(schema.orders.status, 'FILLED')
-        )
-      )
-      .groupBy(schema.orders.userId);
-
     const tradesMap = new Map<string, number>();
     for (const tc of tradeCounts) {
       tradesMap.set(tc.userId, Number(tc.count));
     }
 
-    // 4. Compute mark-to-market equity and PnL for each user
+    // 2. Compute mark-to-market equity and PnL for each user
     const entries = [];
+    const portfolioUpdates: Array<{ id: string; dailyPnl: string }> = [];
+
     for (const user of users) {
       const startCap = new Decimal(user.startingCapital || '1000000');
       const availCash = new Decimal(user.availableCash || '1000000');
@@ -313,15 +319,12 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       const equity = startCap.plus(totalPnl);
       const returnPct = startCap.isZero() ? new Decimal(0) : totalPnl.dividedBy(startCap).times(100);
 
-      // Persist final dailyPnl and updated timestamp to portfolios table
-      if (user.portfolioId) {
-        await app.db
-          .update(schema.portfolios)
-          .set({
-            dailyPnl: totalPnl.toFixed(2),
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.portfolios.id, user.portfolioId));
+      // Collect updates ONLY if persistToDb is true (e.g. event end)
+      if (persistToDb && user.portfolioId) {
+        portfolioUpdates.push({
+          id: user.portfolioId,
+          dailyPnl: totalPnl.toFixed(2),
+        });
       }
 
       entries.push({
@@ -337,6 +340,18 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         trades_count: tradesMap.get(user.userId) || 0,
         updated_at: new Date().toISOString(),
       });
+    }
+
+    // Persist portfolio dailyPnl only when explicitly requested (e.g. event end) in parallel
+    if (persistToDb && portfolioUpdates.length > 0) {
+      Promise.all(
+        portfolioUpdates.map((u) =>
+          app.db
+            .update(schema.portfolios)
+            .set({ dailyPnl: u.dailyPnl, updatedAt: new Date() })
+            .where(eq(schema.portfolios.id, u.id))
+        )
+      ).catch((err) => app.log.error(err, 'Failed to update portfolio dailyPnl in background'));
     }
 
     // Sort by equity descending and assign ranks
@@ -364,7 +379,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       .where(eq(schema.simulationStates.eventId, event.id));
 
     // Calculate final portfolios of all users including open positions mark-to-market
-    const rankedEntries = await calculateFinalPortfoliosAndLeaderboard(event.id);
+    const rankedEntries = await calculateFinalPortfoliosAndLeaderboard(event.id, true);
     const top10 = rankedEntries.slice(0, 10);
 
     // Save final leaderboard snapshot
@@ -1024,14 +1039,19 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
+    // Check lightweight in-memory cache for fast sub-second admin response
+    if (cachedAdminLeaderboard && cachedAdminLeaderboard.eventId === event.id && Date.now() < cachedAdminLeaderboard.expiresAt) {
+      return cachedAdminLeaderboard.data;
+    }
+
     // If no snapshot exists yet or event is active, compute live with open positions
     if (entries.length === 0) {
-      entries = await calculateFinalPortfoliosAndLeaderboard(event.id);
+      entries = await calculateFinalPortfoliosAndLeaderboard(event.id, false);
     }
 
     const top10 = entries.slice(0, 10);
 
-    return {
+    const responseData = {
       data: {
         entries,
         top_10: top10,
@@ -1043,6 +1063,14 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       },
       request_id: request.requestId,
     };
+
+    cachedAdminLeaderboard = {
+      eventId: event.id,
+      data: responseData,
+      expiresAt: Date.now() + 3000, // 3s cache
+    };
+
+    return responseData;
   });
 
 
